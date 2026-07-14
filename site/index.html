@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chad Keith - Founder, Builder, Ships Fast</title>
+<meta name="description" content="Chad Keith builds AI products solo and fast: ConversaTrait, SharkSale, and a stack of tools, skills, and client sites. 420k+ lines of code. mynamesucks.com.">
+<meta property="og:title" content="Chad Keith - Founder, Builder, Ships Fast">
+<meta property="og:description" content="ConversaTrait. SharkSale. And a whole armory of AI tools built solo. mynamesucks.com.">
+<meta property="og:type" content="website">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Space+Grotesk:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<style>
+:root{
+  --ink:#0d0d0d; --red:#d42020; --paper:#faf8f5; --paper2:#f2efea;
+  --rule:#e0dbd4; --mid:#6b6560;
+  --mono:'JetBrains Mono',monospace; --sans:'Space Grotesk',sans-serif;
+  --pad:clamp(28px,7vw,100px); --max:1180px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);overflow-x:hidden;-webkit-font-smoothing:antialiased;}
+a{color:inherit;text-decoration:none;}
+img{display:block;max-width:100%;}
+.mono{font-family:var(--mono);}
+.nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:18px var(--pad);display:flex;justify-content:space-between;align-items:center;background:rgba(250,248,245,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--rule);}
+.nav-logo{font-family:var(--mono);font-weight:700;font-size:.95rem;letter-spacing:.05em;text-transform:uppercase;}
+.nav-logo span{color:var(--red);}
+.nav-links{display:flex;gap:26px;align-items:center;}
+.nav-links a{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mid);transition:color .2s;}
+.nav-links a:hover{color:var(--red);}
+.nav-links a.cta{color:var(--ink);border-bottom:1px solid var(--red);padding-bottom:2px;font-weight:700;}
+@media(max-width:820px){.nav-links a:not(.cta){display:none;}}
+.hero{min-height:100vh;display:grid;grid-template-columns:1.15fr .85fr;align-items:stretch;padding-top:66px;}
+.hero-left{padding:70px var(--pad);border-right:1px solid var(--rule);display:flex;flex-direction:column;justify-content:center;min-height:calc(100vh - 66px);}
+.hero-right{padding:70px var(--pad);display:flex;flex-direction:column;justify-content:center;align-items:flex-start;min-height:calc(100vh - 66px);background:var(--paper2);}
+.hero-tag{font-family:var(--mono);font-size:.65rem;letter-spacing:.18em;text-transform:uppercase;color:var(--red);margin-bottom:26px;display:flex;align-items:center;gap:12px;}
+.hero-tag::before{content:'';width:28px;height:1px;background:var(--red);}
+.hero-name{font-size:clamp(3.2rem,6.5vw,6rem);font-weight:800;letter-spacing:-.045em;line-height:.94;margin-bottom:14px;}
+.hero-name .line{overflow:hidden;}
+.hero-name .line span{display:block;}
+.hero-product{font-family:var(--mono);font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mid);margin-bottom:30px;}
+.hero-product em{color:var(--red);font-style:normal;font-weight:700;}
+.hero-pitch{font-size:clamp(1rem,1.5vw,1.16rem);line-height:1.75;max-width:520px;margin-bottom:14px;}
+.hero-pitch strong{font-weight:700;}
+.hero-aside{font-family:var(--mono);font-size:.68rem;color:var(--mid);margin-bottom:34px;font-style:italic;line-height:1.6;max-width:440px;}
+.hero-cta-row{display:flex;gap:12px;flex-wrap:wrap;}
+.btn{font-family:var(--mono);font-weight:700;font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;padding:14px 28px;display:inline-flex;align-items:center;gap:9px;transition:all .2s;border:none;cursor:pointer;clip-path:polygon(0 0,100% 0,100% 70%,93% 100%,0 100%);white-space:nowrap;}
+.btn-dark{background:var(--ink);color:var(--paper);}
+.btn-dark:hover{background:var(--red);box-shadow:0 8px 32px rgba(212,32,32,.28);transform:translateY(-2px);}
+.btn-outline{background:transparent;color:var(--ink);border:1.5px solid rgba(13,13,13,.25);}
+.btn-outline:hover{border-color:var(--red);color:var(--red);transform:translateY(-2px);}
+.photo-wrap{width:180px;height:180px;border-radius:50%;border:2px solid var(--ink);box-shadow:0 0 0 8px rgba(13,13,13,.05),0 0 0 16px rgba(212,32,32,.06),0 24px 64px rgba(13,13,13,.14);overflow:hidden;margin-bottom:30px;flex-shrink:0;}
+.photo-wrap img{width:100%;height:100%;object-fit:cover;object-position:center top;}
+.quick-facts{display:flex;flex-direction:column;gap:15px;margin-bottom:32px;width:100%;}
+.fact-row{display:flex;align-items:baseline;gap:14px;}
+.fact-num{font-size:1.9rem;font-weight:800;letter-spacing:-.04em;color:var(--ink);line-height:1;flex-shrink:0;min-width:86px;}
+.fact-num em{color:var(--red);font-style:normal;}
+.fact-text{font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mid);line-height:1.6;}
+.fact-text small{display:block;font-size:.57rem;color:rgba(107,101,96,.6);letter-spacing:.06em;font-style:italic;text-transform:none;margin-top:2px;}
+.contact-label{font-family:var(--mono);font-size:.58rem;letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin-bottom:8px;}
+.contact-col{display:flex;flex-direction:column;gap:10px;width:100%;}
+.contact-line{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;padding:10px 16px;border:1px solid var(--rule);color:var(--ink);display:flex;align-items:center;gap:10px;transition:all .2s;clip-path:polygon(0 0,100% 0,100% 68%,96% 100%,0 100%);}
+.contact-line:hover{border-color:var(--red);color:var(--red);}
+.contact-line.primary{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:700;}
+.contact-line.primary:hover{background:var(--red);border-color:var(--red);box-shadow:0 6px 24px rgba(212,32,32,.25);}
+.divider-band{background:var(--ink);color:var(--paper);padding:24px var(--pad);display:flex;align-items:center;gap:32px;overflow:hidden;}
+.db-label{font-family:var(--mono);font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3);white-space:nowrap;flex-shrink:0;}
+.db-scroll{display:flex;overflow:hidden;flex:1;}
+.db-track{display:flex;white-space:nowrap;}
+.db-item{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.4);padding:0 32px;flex-shrink:0;}
+.db-item.hi{color:var(--red);}
+</style>
+<style>
+.section{padding:90px var(--pad);max-width:var(--max);margin:0 auto;}
+.section.alt{background:var(--paper2);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);max-width:none;}
+.section.alt .inner{max-width:var(--max);margin:0 auto;}
+.section-eyebrow{font-family:var(--mono);font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:var(--red);margin-bottom:18px;display:flex;align-items:center;gap:12px;}
+.section-eyebrow::before{content:'';width:28px;height:1px;background:var(--red);}
+.section-title{font-size:clamp(2rem,4vw,3.4rem);font-weight:800;letter-spacing:-.04em;line-height:1.05;margin-bottom:16px;}
+.section-title span{color:var(--red);}
+.section-lead{font-size:1.02rem;line-height:1.7;color:var(--mid);max-width:640px;margin-bottom:46px;}
+.flagship-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--rule);border:1px solid var(--rule);}
+.flag-card{background:var(--paper);padding:44px 40px;display:flex;flex-direction:column;transition:background .2s;}
+.flag-card:hover{background:#fff;}
+.flag-card.dark{background:var(--ink);color:var(--paper);}
+.flag-card.dark:hover{background:#151515;}
+.flag-kicker{font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--red);margin-bottom:16px;}
+.flag-name{font-size:2rem;font-weight:800;letter-spacing:-.03em;line-height:1;margin-bottom:6px;}
+.flag-name span{color:var(--red);}
+.flag-sub{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;opacity:.6;margin-bottom:20px;}
+.flag-body{font-size:.94rem;line-height:1.7;opacity:.82;margin-bottom:24px;flex:1;}
+.flag-card:not(.dark) .flag-body{color:var(--mid);}
+.flag-stats{display:flex;gap:26px;margin-bottom:26px;flex-wrap:wrap;}
+.flag-stat b{display:block;font-size:1.5rem;font-weight:800;letter-spacing:-.03em;line-height:1;}
+.flag-stat b em{color:var(--red);font-style:normal;}
+.flag-stat span{font-family:var(--mono);font-size:.56rem;letter-spacing:.1em;text-transform:uppercase;opacity:.55;}
+.flag-cta{display:flex;gap:10px;flex-wrap:wrap;}
+@media(max-width:760px){.flagship-grid{grid-template-columns:1fr;}}
+.proj-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:var(--rule);border:1px solid var(--rule);}
+.proj-card{background:var(--paper);padding:28px 26px;display:flex;flex-direction:column;transition:background .2s;}
+.proj-card:hover{background:#fff;}
+.proj-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;gap:10px;}
+.proj-tag{font-family:var(--mono);font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;color:var(--red);}
+.proj-lang{font-family:var(--mono);font-size:.56rem;letter-spacing:.1em;text-transform:uppercase;color:rgba(107,101,96,.55);white-space:nowrap;}
+.proj-name{font-size:1.14rem;font-weight:700;letter-spacing:-.02em;line-height:1.2;margin-bottom:10px;}
+.proj-desc{font-size:.83rem;color:var(--mid);line-height:1.6;flex:1;margin-bottom:16px;}
+.proj-links{display:flex;gap:14px;flex-wrap:wrap;}
+.proj-links a{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);border-bottom:1px solid transparent;padding-bottom:2px;transition:all .2s;}
+.proj-links a:hover{color:var(--red);border-color:var(--red);}
+.cat-head{grid-column:1/-1;background:var(--ink);color:var(--paper);padding:16px 26px;font-family:var(--mono);font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;}
+.cat-head span{color:var(--red);}
+@media(max-width:900px){.proj-grid{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:560px){.proj-grid{grid-template-columns:1fr;}}
+.science-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--rule);border:1px solid var(--rule);}
+.science-cell{background:var(--paper);padding:34px 30px;}
+.science-cell.dark{background:var(--ink);color:var(--paper);}
+.science-cell.accent{background:var(--red);color:#fff;}
+.cell-label{font-family:var(--mono);font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;opacity:.5;margin-bottom:12px;}
+.cell-stat{font-size:clamp(2rem,4vw,3.4rem);font-weight:800;letter-spacing:-.04em;line-height:1;margin-bottom:10px;}
+.cell-desc{font-size:.88rem;line-height:1.66;opacity:.8;max-width:340px;}
+.science-cell:not(.dark):not(.accent) .cell-desc{color:var(--mid);}
+.cell-desc a{color:inherit;border-bottom:1px solid currentColor;padding-bottom:1px;}
+@media(max-width:700px){.science-grid{grid-template-columns:1fr;}}
+.about-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:var(--rule);border:1px solid var(--rule);margin-top:8px;}
+.about-cell{background:var(--paper);padding:32px 30px;}
+.about-cell-label{font-family:var(--mono);font-size:.58rem;letter-spacing:.16em;text-transform:uppercase;color:var(--red);margin-bottom:10px;}
+.about-cell-head{font-size:1.02rem;font-weight:700;letter-spacing:-.01em;margin-bottom:10px;line-height:1.3;}
+.about-cell-body{font-size:.85rem;color:var(--mid);line-height:1.66;}
+@media(max-width:700px){.about-grid{grid-template-columns:1fr;}}
+.final-cta{padding:100px var(--pad);background:var(--ink);color:var(--paper);text-align:center;}
+.final-cta h2{font-size:clamp(2.4rem,6vw,5rem);font-weight:800;letter-spacing:-.045em;line-height:1;margin-bottom:16px;}
+.final-cta h2 span{color:var(--red);}
+.cta-sub{font-size:1.02rem;color:rgba(255,255,255,.55);line-height:1.75;margin-bottom:38px;max-width:540px;margin-left:auto;margin-right:auto;}
+.cta-sub em{color:rgba(255,255,255,.35);font-style:italic;}
+.final-contact{display:flex;flex-direction:column;align-items:center;gap:10px;max-width:380px;margin:0 auto;}
+.final-chip{width:100%;font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;padding:14px 24px;display:flex;align-items:center;justify-content:center;gap:10px;transition:all .2s;clip-path:polygon(0 0,100% 0,100% 68%,95% 100%,0 100%);}
+.f-primary{background:var(--red);color:#fff;font-weight:700;}
+.f-primary:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(212,32,32,.4);}
+.f-outline{background:transparent;color:rgba(255,255,255,.8);border:1px solid rgba(255,255,255,.22);}
+.f-outline:hover{border-color:var(--red);color:#fff;}
+.footer-fine{background:var(--ink);color:rgba(255,255,255,.4);font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-align:center;padding:0 var(--pad) 50px;line-height:1.9;border-top:1px solid rgba(255,255,255,.08);}
+.footer-fine em{color:var(--red);font-style:normal;}
+.reveal{opacity:0;transform:translateY(18px);}
+@media(max-width:820px){
+  .hero{grid-template-columns:1fr;}
+  .hero-left{border-right:none;border-bottom:1px solid var(--rule);min-height:auto;}
+  .hero-right{min-height:auto;align-items:center;text-align:center;}
+  .quick-facts,.contact-col{align-items:center;}
+  .fact-row{justify-content:center;}
+}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <span class="nav-logo"><a href="#top">CHAD<span>KEITH</span></a></span>
+  <div class="nav-links">
+    <a href="#flagship">Products</a>
+    <a href="#work">Work</a>
+    <a href="#science">Science</a>
+    <a href="#about">About</a>
+    <a href="#contact" class="cta">Contact</a>
+  </div>
+</nav>
+<section class="hero" id="top">
+  <div class="hero-left">
+    <div class="hero-tag">Founder &middot; Builder &middot; MYNAMESUCKS.COM</div>
+    <div class="hero-name">
+      <div class="line"><span id="n1">chad.</span></div>
+      <div class="line"><span id="n2">.keith</span></div>
+    </div>
+    <div class="hero-product">Ships real AI products &mdash; <em>solo, fast, unfunded</em></div>
+    <p class="hero-pitch">
+      I build things. Two live SaaS products, a stack of AI tools and developer
+      skills, and client sites &mdash; most of it written solo in the last couple of years.
+      <strong>ConversaTrait</strong> reads personality from plain conversation.
+      <strong>SharkSale</strong> puts you on a live voice call with an AI buyer that
+      fights not to buy. The rest is below. 420,000+ lines of code and counting.
+    </p>
+    <p class="hero-aside">// yes, the domain is a joke. the work isn't.</p>
+    <div class="hero-cta-row">
+      <a href="#flagship" class="btn btn-dark">see the products</a>
+      <a href="tel:6503154084" class="btn btn-outline">text to book</a>
+    </div>
+  </div>
+  <div class="hero-right">
+    <div class="photo-wrap"><img src="assets/chad.jfif" alt="Chad Keith"></div>
+    <div class="quick-facts">
+      <div class="fact-row"><div class="fact-num">420<em>k</em></div><div class="fact-text">Lines of code<small>built solo, no team</small></div></div>
+      <div class="fact-row"><div class="fact-num">2</div><div class="fact-text">Live SaaS products<small>ConversaTrait + SharkSale</small></div></div>
+      <div class="fact-row"><div class="fact-num">20<em>+</em></div><div class="fact-text">Shipped projects<small>tools, skills and sites</small></div></div>
+      <div class="fact-row"><div class="fact-num">r<em>0.83</em></div><div class="fact-text">BFI correlation<small>internal pilot vs baseline</small></div></div>
+    </div>
+    <div style="width:100%;">
+      <div class="contact-label">Preferred contact</div>
+      <div class="contact-col">
+        <a href="tel:6503154084" class="contact-line primary">650-315-4084 &middot; text me, i reply</a>
+        <a href="mailto:chad@conversatrait.com" class="contact-line">chad@conversatrait.com</a>
+        <a href="https://linkedin.com/in/chadpkeith" target="_blank" rel="noopener" class="contact-line">linkedin.com/in/chadpkeith</a>
+        <a href="https://github.com/chchchadzilla" target="_blank" rel="noopener" class="contact-line">github.com/chchchadzilla</a>
+      </div>
+    </div>
+  </div>
+</section>
+<div class="divider-band">
+  <span class="db-label">// the stack</span>
+  <div class="db-scroll"><div class="db-track" id="dbt"></div></div>
+</div>
+<section class="section" id="flagship">
+  <div class="section-eyebrow reveal">Flagship Products</div>
+  <h2 class="section-title reveal">Two products that are<br><span>live and taking users.</span></h2>
+  <p class="section-lead reveal">Not demos. Not decks. Real products people can use today.</p>
+  <div class="flagship-grid">
+    <div class="flag-card dark reveal">
+      <div class="flag-kicker">SaaS &middot; AI Personality Engine</div>
+      <div class="flag-name">Conversa<span>Trait</span></div>
+      <div class="flag-sub">Read personality from any conversation</div>
+      <p class="flag-body">
+        Paste a real conversation &mdash; texts, Discord, email, interview transcripts &mdash;
+        and get a psychological read: Big Five, MBTI, conflict style, hidden talents,
+        career fit and more. 29 analysis modes, model-agnostic across 200+ LLMs.
+        No 200-question survey, no self-report bias. Its core thesis was independently
+        validated in a peer-reviewed <em>Nature Human Behaviour</em> study in Feb 2026.
+      </p>
+      <div class="flag-stats">
+        <div class="flag-stat"><b>29</b><span>analysis modes</span></div>
+        <div class="flag-stat"><b>200<em>+</em></b><span>supported models</span></div>
+        <div class="flag-stat"><b>r<em>0.83</em></b><span>pilot correlation</span></div>
+      </div>
+      <div class="flag-cta">
+        <a href="https://www.conversatrait.com" target="_blank" rel="noopener" class="btn btn-dark">visit conversatrait.com</a>
+        <a href="#science" class="btn btn-outline" style="color:var(--paper);border-color:rgba(255,255,255,.28);">the science</a>
+      </div>
+    </div>
+    <div class="flag-card reveal">
+      <div class="flag-kicker">SaaS &middot; Voice AI Sales Trainer</div>
+      <div class="flag-name">Shark<span>Sale</span></div>
+      <div class="flag-sub">AI sales training that talks back</div>
+      <p class="flag-body">
+        Jump into a Discord voice channel and pitch an AI buyer that talks back,
+        throws objections, and fights not to buy. Full-duplex voice, 2,304 possible
+        buyer personas, 10 difficulty levels, and six-dimension scoring with a
+        coaching report after every call. Earn certificates Bronze to Diamond.
+        Coffee's for closers &mdash; sales are for sharks.
+      </p>
+      <div class="flag-stats">
+        <div class="flag-stat"><b>2,304</b><span>buyer personas</span></div>
+        <div class="flag-stat"><b>37</b><span>AI voices</span></div>
+        <div class="flag-stat"><b>6</b><span>scoring dimensions</span></div>
+      </div>
+      <div class="flag-cta">
+        <a href="https://sharksale.pro" target="_blank" rel="noopener" class="btn btn-dark">visit sharksale.pro</a>
+      </div>
+    </div>
+  </div>
+</section>
+<section class="section alt" id="work">
+ <div class="inner">
+  <div class="section-eyebrow reveal">Selected Work</div>
+  <h2 class="section-title reveal">Tools, skills, apps &amp;<br><span>sites I have shipped.</span></h2>
+  <p class="section-lead reveal">A working sample from the GitHub. AI dev tooling, standalone apps, and client web work. Everything here is public and real.</p>
+  <div class="proj-grid">
+
+    <div class="cat-head reveal">// AI Tools &amp; Apps</div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">App</span><span class="proj-lang">HTML</span></div>
+      <div class="proj-name">ChadobeKeithrobat</div>
+      <p class="proj-desc">Free in-browser PDF editing: text matching, adding, and editing. From the "Chadobe Creative" line of tools.</p>
+      <div class="proj-links"><a href="https://chchchadzilla.github.io/ChadobeKeithrobat/" target="_blank" rel="noopener">Live</a><a href="https://github.com/chchchadzilla/ChadobeKeithrobat" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">App</span><span class="proj-lang">Python</span></div>
+      <div class="proj-name">STARCoach</div>
+      <p class="proj-desc">Interview-prep coach that helps you build and refine STAR-method answers for behavioral interviews.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/STARCoach" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">Python</span></div>
+      <div class="proj-name">ComfyUI ChomfyNodes</div>
+      <p class="proj-desc">Curated custom ComfyUI nodes for wildcard prompt assembly, file-driven generation, and counters. Built for dynamic Flux workflows.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/ComfyUI-ChomfyNodes" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">TypeScript</span></div>
+      <div class="proj-name">Robot Content Librarian</div>
+      <p class="proj-desc">A content management/organization tool for AI-generated assets and media pipelines.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/Robot-Content-Librarian" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">TypeScript</span></div>
+      <div class="proj-name">Agentic RAG Demo Toolkit</div>
+      <p class="proj-desc">A demo toolkit for building agentic retrieval-augmented-generation workflows.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/Agentic-RAG-Demo-Toolkit" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">JavaScript</span></div>
+      <div class="proj-name">WP Plugin Generator</div>
+      <p class="proj-desc">Scaffolds WordPress plugins fast, generating the boilerplate structure so you can jump straight to the feature.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/wp-plugin-generator" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="cat-head reveal">// AI Agent Skills &amp; Plugins</div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Skill</span><span class="proj-lang">Markdown</span></div>
+      <div class="proj-name">slop-cop</div>
+      <p class="proj-desc">Visual QA skill for AI agents. Catches hallucinated text, broken layouts, and misleading charts before assets ship to prod.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/slop-cop" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Skill</span><span class="proj-lang">Python</span></div>
+      <div class="proj-name">mimic-my-writing</div>
+      <p class="proj-desc">Extracts a quantitative voice fingerprint from writing samples &mdash; burstiness, profanity rate, signature n-grams &mdash; and forces AI to draft in your voice.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/mimic-my-writing" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">Python</span></div>
+      <div class="proj-name">skill-auto-router</div>
+      <p class="proj-desc">Automatic pre-task skill matching plus daily routing-quality audits for AI agent skill libraries.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/skill-auto-router" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Plugin</span><span class="proj-lang">JavaScript</span></div>
+      <div class="proj-name">openclaw-codestats</div>
+      <p class="proj-desc">Plugin that pulses every write/edit tool call to Code::Stats, so your AI agent earns you coding XP while it works.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/openclaw-codestats" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">JavaScript</span></div>
+      <div class="proj-name">OpenStealth</div>
+      <p class="proj-desc">A stealth/utility toolkit for browser automation and agent workflows.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/OpenStealth" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Tooling</span><span class="proj-lang">JavaScript</span></div>
+      <div class="proj-name">ChatRobber</div>
+      <p class="proj-desc">A utility for extracting and archiving chat/conversation data for later analysis.</p>
+      <div class="proj-links"><a href="https://github.com/chchchadzilla/ChatRobber" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="cat-head reveal">// Client &amp; Web Work</div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Site</span><span class="proj-lang">TypeScript</span></div>
+      <div class="proj-name">Black Light Group</div>
+      <p class="proj-desc">Marketing page built to a client's brand outline and "Small" page format.</p>
+      <div class="proj-links"><a href="https://chchchadzilla.github.io/blacklightgrp/" target="_blank" rel="noopener">Live</a><a href="https://github.com/chchchadzilla/blacklightgrp" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Site</span><span class="proj-lang">HTML</span></div>
+      <div class="proj-name">Redongler</div>
+      <p class="proj-desc">A project site for repurposing old mice, keyboards, peripherals, and dongles into something reusable again.</p>
+      <div class="proj-links"><a href="https://chchchadzilla.github.io/redongler/" target="_blank" rel="noopener">Live</a><a href="https://github.com/chchchadzilla/redongler" target="_blank" rel="noopener">Code</a></div>
+    </div>
+
+    <div class="proj-card reveal">
+      <div class="proj-top"><span class="proj-tag">Site</span><span class="proj-lang">HTML</span></div>
+      <div class="proj-name">InstaFams</div>
+      <p class="proj-desc">Family legacy preservation site &mdash; a place to gather and keep family stories and history.</p>
+      <div class="proj-links"><a href="https://chchchadzilla.github.io/instafams/" target="_blank" rel="noopener">Live</a><a href="https://github.com/chchchadzilla/instafams" target="_blank" rel="noopener">Code</a></div>
+    </div>
+  </div>
+ </div>
+</section>
+<section class="section" id="science">
+  <div class="section-eyebrow reveal">The Science</div>
+  <h2 class="section-title reveal">The thesis is<br><span>peer-reviewed.</span></h2>
+  <div class="science-grid">
+    <div class="science-cell dark reveal">
+      <div class="cell-label">Nature Human Behaviour &middot; Feb 2, 2026</div>
+      <div class="cell-stat">Proven</div>
+      <p class="cell-desc">A peer-reviewed study in <a href="https://www.nature.com/articles/s41562-025-02397-x" target="_blank" rel="noopener"><em>Nature Human Behaviour</em></a> found that large language models predict personality traits more accurately than close friends and family from open-ended narrative &mdash; from text alone. ConversaTrait was already built on that premise when it published.</p>
+    </div>
+    <div class="science-cell accent reveal">
+      <div class="cell-label">Internal Pilot Study</div>
+      <div class="cell-stat">r = 0.83</div>
+      <p class="cell-desc">Correlation with a clinical Big Five Inventory baseline across a small internal cohort. Non-IRB, anecdotal at best &mdash; but a strong signal to justify a fully funded, third-party, university-paired replication. That is the next step.</p>
+    </div>
+    <div class="science-cell reveal">
+      <div class="cell-label">The Input</div>
+      <div class="cell-stat" style="font-size:1.5rem;letter-spacing:-.02em;line-height:1.3;">Any conversation.<br>Any platform.<br>Any written text.</div>
+      <p class="cell-desc">WhatsApp, Discord, email, SMS, interview transcripts. If it is text, it is data. No surveys. No self-report bias. No 200-question form nobody finishes.</p>
+    </div>
+    <div class="science-cell reveal">
+      <div class="cell-label">The Model Gap</div>
+      <div class="cell-stat" style="font-size:1.5rem;letter-spacing:-.02em;line-height:1.3;">Model-agnostic.<br>200+ models.</div>
+      <p class="cell-desc">The Nature study used GPT-4.1. ConversaTrait runs on any model you choose &mdash; over 200 of them &mdash; where most tools give you no choice at all. The accuracy delta between the study model and current-generation models is staggering.</p>
+    </div>
+  </div>
+</section>
+<section class="section alt" id="about">
+ <div class="inner">
+  <div class="section-eyebrow reveal">About Chad</div>
+  <h2 class="section-title reveal">The wildly non-linear<br><span>road to here.</span></h2>
+  <div class="about-grid">
+    <div class="about-cell reveal">
+      <div class="about-cell-label">The Background</div>
+      <div class="about-cell-head">Silicon Valley native. Unschooled from age five.</div>
+      <p class="about-cell-body">Bay Area kid. Volunteer zookeeper. Solo rotorcraft pilot rating at 17. Performed in a circus. Berklee College of Music and Musician's Institute. Toured 10 years playing drums in a thrash metal band &mdash; Warped Tour vet &mdash; and negotiated a network TV sync deal. Then business: Director of Business Operations for 8 years.</p>
+    </div>
+    <div class="about-cell reveal">
+      <div class="about-cell-label">The Reset</div>
+      <div class="about-cell-head">Broke both feet. Then COVID hit.</div>
+      <p class="about-cell-body">A bad car accident put him on disability. Two weeks before returning, COVID hit and the company tanked. He went back to school at 34 for a marketing degree (CSUN, 2025), having started coding and training AI models in 2020. Six years later, ConversaTrait was born.</p>
+    </div>
+    <div class="about-cell reveal">
+      <div class="about-cell-label">The Proof</div>
+      <div class="about-cell-head">I used it on my own family.</div>
+      <p class="about-cell-body">He ran a years-long argument with his brother through the engine. It explained where they kept missing each other so clearly that both texted the same thing at once: "I think I finally get how you think, man." They went from two texts a year to talking weekly. From one ConversaTrait output.</p>
+    </div>
+    <div class="about-cell reveal">
+      <div class="about-cell-label">The Approach</div>
+      <div class="about-cell-head">Build fast. Ship real. No hand-holding.</div>
+      <p class="about-cell-body">420,000+ lines of code. Two live products. A stack of tools and skills. All solo, on a shoestring, in a couple of years. If it can help someone the way it helped him, it is worth making &mdash; and worth sharing.</p>
+    </div>
+  </div>
+ </div>
+</section>
+<div class="final-cta" id="contact">
+  <h2>Let's build<br><span>something.</span></h2>
+  <p class="cta-sub">Booking, a demo, a collaboration, or just to talk shop &mdash; a call or text is the fastest way to reach me. No gatekeepers, no assistants, no Calendly link two weeks out.<br><br><em>Just call.</em></p>
+  <div class="final-contact">
+    <a href="tel:6503154084" class="final-chip f-primary">650-315-4084</a>
+    <a href="mailto:chad@conversatrait.com" class="final-chip f-outline">chad@conversatrait.com</a>
+    <a href="https://linkedin.com/in/chadpkeith" target="_blank" rel="noopener" class="final-chip f-outline">linkedin.com/in/chadpkeith</a>
+    <a href="https://github.com/chchchadzilla" target="_blank" rel="noopener" class="final-chip f-outline">github.com/chchchadzilla</a>
+  </div>
+</div>
+<div class="footer-fine">
+  (c) 2026-2027 CHAD KEITH &middot; chad@conversatrait.com &middot; 650-315-4084<br>
+  "Technological Advancement Without Human Displacement"<br>
+  <em>mynamesucks.com</em>
+</div>
+<script>
+gsap.registerPlugin(ScrollTrigger);
+gsap.from(['#n1','#n2'],{y:'105%',opacity:0,duration:1.0,stagger:.08,ease:'expo.out',delay:.1});
+gsap.from(['.hero-tag','.hero-product','.hero-pitch','.hero-aside','.hero-cta-row'],{opacity:0,y:16,duration:.7,stagger:.1,ease:'power2.out',delay:.5});
+gsap.from(['.photo-wrap','.quick-facts','.contact-col'],{opacity:0,y:20,duration:.7,stagger:.12,ease:'power2.out',delay:.4});
+(function(){
+  var stack=['ConversaTrait','SharkSale','ChadobeKeithrobat','STARCoach','ComfyUI ChomfyNodes','Robot Content Librarian','Agentic RAG Toolkit','WP Plugin Generator','slop-cop','mimic-my-writing','skill-auto-router','openclaw-codestats','OpenStealth','ChatRobber','Black Light Group','Redongler','InstaFams'];
+  var track=document.getElementById('dbt');
+  for(var i=0;i<4;i++){stack.forEach(function(m,j){var s=document.createElement('span');s.className='db-item'+(j%5===0?' hi':'');s.textContent=m+'   /   ';track.appendChild(s);});}
+  var x=0,dir=1,lastY=0;
+  window.addEventListener('scroll',function(){dir=window.scrollY>lastY?1:-1;lastY=window.scrollY;},{passive:true});
+  (function loop(){x-=.45*dir;var w=track.scrollWidth/4;if(x<-w)x=0;if(x>0)x=-w;track.style.transform='translateX('+x+'px)';requestAnimationFrame(loop);})();
+})();
+gsap.utils.toArray('.reveal').forEach(function(el){gsap.to(el,{scrollTrigger:{trigger:el,start:'top 90%'},opacity:1,y:0,duration:.6,ease:'power2.out'});});
+['.flagship-grid','.proj-grid','.science-grid','.about-grid'].forEach(function(sel){var g=document.querySelector(sel);if(!g)return;gsap.from(g.children,{scrollTrigger:{trigger:g,start:'top 86%'},opacity:0,y:22,stagger:.05,duration:.5,ease:'power2.out'});});
+</script>
+</body>
+</html>
