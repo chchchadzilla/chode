@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CHODE - The Local-First Agentic Powerhouse</title>
+    <meta name="description" content="CHODE (Chad Code) is a pragmatic, local-first agentic coding assistant running in your terminal. Built for builders who ship fast and refuse slop.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Editorial Serif paired with a sharp, high-contrast Monospace -->
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,400&family=Space+Mono:wght@400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <style>
+        :root {
+            --bg: #0a0a0c;
+            --surface: #111115;
+            --surface-accent: #181820;
+            --border: #22222a;
+            --border-accent: #3f3f4f;
+            --text: #f3f3f7;
+            --text-muted: #8e8e9f;
+            --primary: #00ff66;
+            --primary-glow: rgba(0, 255, 102, 0.12);
+            --accent: #ff0055;
+            --accent-glow: rgba(255, 0, 85, 0.12);
+            --font-display: 'Syne', sans-serif;
+            --font-serif: 'Playfair Display', serif;
+            --font-mono: 'Space Mono', monospace;
+            --tuna-border: 24px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            font-family: var(--font-mono);
+            overflow-x: hidden;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-accent);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+
+        /* Thick Tuna Can Frame */
+        .tuna-frame {
+            border: var(--tuna-border) solid var(--surface);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        @media (max-width: 768px) {
+            .tuna-frame {
+                border: 12px solid var(--surface);
+            }
+            :root {
+                --tuna-border: 12px;
+            }
+        }
+
+        /* Custom Grid Lines Background */
+        .grid-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 80px 80px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 32px 60px;
+            border-bottom: 2px solid var(--border);
+            background: rgba(10, 10, 12, 0.85);
+            backdrop-filter: blur(16px);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        @media (max-width: 768px) {
+            header {
+                padding: 20px 24px;
+            }
+        }
+
+        .logo {
+            font-family: var(--font-display);
+            font-weight: 800;
+            font-size: 1.8rem;
+            color: var(--text);
+            text-decoration: none;
+            letter-spacing: -1px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo span {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            letter-spacing: 0;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 40px;
+        }
+
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+            position: relative;
+        }
+
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--primary);
+            transition: width 0.2s;
+        }
+
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+        }
+
+        /* Hero Section */
+        .hero {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            border-bottom: 2px solid var(--border);
+            min-height: calc(100vh - 110px);
+            position: relative;
+            z-index: 2;
+        }
+
+        @media (max-width: 1024px) {
+            .hero {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .hero-content {
+            padding: 100px 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border-right: 2px solid var(--border);
+        }
+
+        @media (max-width: 768px) {
+            .hero-content {
+                padding: 60px 24px;
+                border-right: none;
+            }
+        }
+
+        .kicker {
+            font-size: 0.9rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 24px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .kicker::before {
+            content: '';
+            width: 24px;
+            height: 2px;
+            background: var(--accent);
+        }
+
+        h1 {
+            font-family: var(--font-display);
+            font-size: clamp(3.5rem, 8vw, 6.5rem);
+            font-weight: 900;
+            line-height: 0.9;
+            letter-spacing: -3px;
+            margin-bottom: 32px;
+            text-transform: uppercase;
+        }
+
+        h1 span {
+            font-family: var(--font-serif);
+            font-style: italic;
+            font-weight: 400;
+            text-transform: none;
+            color: var(--primary);
+            letter-spacing: -1px;
+        }
+
+        .lead {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            margin-bottom: 48px;
+            max-width: 640px;
+            line-height: 1.7;
+        }
+
+        .cta-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            padding: 20px 40px;
+            font-weight: 700;
+            text-decoration: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            font-size: 1rem;
+            border-radius: 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: var(--bg);
+            border: 2px solid var(--primary);
+        }
+
+        .btn-primary:hover {
+            background: transparent;
+            color: var(--primary);
+            box-shadow: 0 0 30px var(--primary-glow);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text);
+            border: 2px solid var(--border-accent);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--text);
+            background: rgba(255,255,255,0.03);
+        }
+
+        /* Terminal Visual */
+        .hero-visual {
+            background: #0d0d11;
+            padding: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        @media (max-width: 768px) {
+            .hero-visual {
+                padding: 40px 24px;
+            }
+        }
+
+        .terminal {
+            width: 100%;
+            max-width: 540px;
+            background: var(--surface);
+            border: 2px solid var(--border-accent);
+            box-shadow: 0 40px 80px rgba(0,0,0,0.6);
+            position: relative;
+        }
+
+        .terminal-header {
+            background: var(--surface-accent);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .dot-1 { background: #ff5f56; }
+        .dot-2 { background: #ffbd2e; }
+        .dot-3 { background: #27c93f; }
+
+        .terminal-title {
+            margin-left: auto;
+            margin-right: auto;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        .terminal-body {
+            padding: 32px;
+            font-size: 0.95rem;
+            color: #a5a5b5;
+            min-height: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .prompt {
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        .typed {
+            color: var(--text);
+        }
+
+        /* Stats Band */
+        .stats-band {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            border-bottom: 2px solid var(--border);
+            background: var(--surface);
+            position: relative;
+            z-index: 2;
+        }
+
+        @media (max-width: 1024px) {
+            .stats-band {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 560px) {
+            .stats-band {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .stat-card {
+            padding: 60px 40px;
+            text-align: center;
+            border-right: 2px solid var(--border);
+        }
+
+        .stat-card:last-child {
+            border-right: none;
+        }
+
+        @media (max-width: 1024px) {
+            .stat-card:nth-child(2n) {
+                border-right: none;
+            }
+            .stat-card {
+                border-bottom: 2px solid var(--border);
+            }
+            .stat-card:nth-last-child(-n+2) {
+                border-bottom: none;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .stat-card {
+                border-right: none !important;
+                border-bottom: 2px solid var(--border) !important;
+            }
+            .stat-card:last-child {
+                border-bottom: none !important;
+            }
+        }
+
+        .stat-val {
+            font-family: var(--font-display);
+            font-size: clamp(2.5rem, 5vw, 4.5rem);
+            font-weight: 900;
+            color: var(--text);
+            line-height: 1;
+            margin-bottom: 12px;
+            letter-spacing: -2px;
+        }
+
+        .stat-val span {
+            color: var(--primary);
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-weight: 700;
+        }
+
+        /* Features Section */
+        .features {
+            padding: 140px 80px;
+            border-bottom: 2px solid var(--border);
+            position: relative;
+            z-index: 2;
+        }
+
+        @media (max-width: 768px) {
+            .features {
+                padding: 80px 24px;
+            }
+        }
+
+        .section-header {
+            margin-bottom: 80px;
+            max-width: 800px;
+        }
+
+        .section-title {
+            font-family: var(--font-display);
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 24px;
+            text-transform: uppercase;
+            letter-spacing: -2px;
+        }
+
+        .section-title span {
+            font-family: var(--font-serif);
+            font-style: italic;
+            font-weight: 400;
+            text-transform: none;
+            color: var(--primary);
+            letter-spacing: -1px;
+        }
+
+        .section-desc {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            line-height: 1.7;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 40px;
+        }
+
+        @media (max-width: 1024px) {
+            .features-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .feature-card {
+            background: var(--surface);
+            border: 2px solid var(--border);
+            padding: 48px;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary);
+            transform: scaleY(0);
+            transition: transform 0.3s ease;
+            transform-origin: bottom;
+        }
+
+        .feature-card:hover::before {
+            transform: scaleY(1);
+            transform-origin: top;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border-accent);
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        }
+
+        .feature-num {
+            font-family: var(--font-display);
+            font-size: 3rem;
+            font-weight: 900;
+            color: rgba(255,255,255,0.03);
+            position: absolute;
+            top: 24px;
+            right: 32px;
+            line-height: 1;
+        }
+
+        .feature-card h3 {
+            font-family: var(--font-display);
+            font-size: 1.6rem;
+            font-weight: 800;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+
+        .feature-card p {
+            color: var(--text-muted);
+            font-size: 1rem;
+            line-height: 1.7;
+        }
+
+        /* Interactive Playground */
+        .playground {
+            padding: 140px 80px;
+            background: #08080b;
+            border-bottom: 2px solid var(--border);
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 100px;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        @media (max-width: 1024px) {
+            .playground {
+                grid-template-columns: 1fr;
+                gap: 60px;
+                padding: 80px 24px;
+            }
+        }
+
+        .playground-info h2 {
+            font-family: var(--font-display);
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 900;
+            line-height: 1;
+            margin-bottom: 24px;
+            text-transform: uppercase;
+            letter-spacing: -2px;
+        }
+
+        .playground-info h2 span {
+            font-family: var(--font-serif);
+            font-style: italic;
+            font-weight: 400;
+            text-transform: none;
+            color: var(--primary);
+            letter-spacing: -1px;
+        }
+
+        .playground-info p {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            margin-bottom: 40px;
+            line-height: 1.7;
+        }
+
+        .skills-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        .skill-item {
+            background: var(--surface);
+            border: 2px solid var(--border);
+            padding: 24px 32px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .skill-item:hover, .skill-item.active {
+            border-color: var(--primary);
+            background: var(--surface-accent);
+        }
+
+        .skill-name {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .skill-arrow {
+            color: var(--primary);
+            font-weight: 700;
+            transition: transform 0.3s;
+        }
+
+        .skill-item:hover .skill-arrow, .skill-item.active .skill-arrow {
+            transform: translateX(8px);
+        }
+
+        .playground-terminal {
+            background: var(--surface);
+            border: 2px solid var(--border-accent);
+            box-shadow: 0 50px 100px rgba(0,0,0,0.8);
+        }
+
+        .playground-terminal-body {
+            padding: 40px;
+            font-size: 1rem;
+            min-height: 380px;
+            color: #a5a5b5;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Footer */
+        footer {
+            padding: 80px;
+            background: var(--bg);
+            border-top: 2px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+        }
+
+        @media (max-width: 768px) {
+            footer {
+                padding: 40px 24px;
+                flex-direction: column;
+                gap: 32px;
+                text-align: center;
+            }
+        }
+
+        .footer-logo {
+            font-family: var(--font-display);
+            font-weight: 900;
+            font-size: 1.6rem;
+            letter-spacing: -1px;
+            text-transform: uppercase;
+        }
+
+        .footer-logo span {
+            color: var(--primary);
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 32px;
+        }
+
+        .footer-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--primary);
+        }
+    </style>
+</head>
+<body>
+    <div class="tuna-frame">
+        <div class="grid-bg"></div>
+
+        <!-- Header -->
+        <header>
+            <a href="#" class="logo">CHODE <span>v0.4.0</span></a>
+            <nav class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#playground">Playground</a>
+                <a href="#skills">Skills</a>
+            </nav>
+        </header>
+
+        <!-- Hero Section -->
+        <section class="hero">
+            <div class="hero-content">
+                <div class="kicker">Local-First Agentic Power</div>
+                <h1>Pragmatic.<br>Surgical.<br><span>No Slop.</span></h1>
+                <p class="lead">CHODE is a local-first agentic coding assistant engineered for builders who refuse generic AI patterns. We edit surgically, optimize aggressively, and ship code that doesn't suck.</p>
+                <div class="cta-row">
+                    <a href="#playground" class="btn btn-primary">Launch Playground</a>
+                    <a href="#features" class="btn btn-secondary">Explore Features</a>
+                </div>
+            </div>
+            <div class="hero-visual">
+                <div class="terminal">
+                    <div class="terminal-header">
+                        <div class="dot dot-1"></div>
+                        <div class="dot dot-2"></div>
+                        <div class="dot dot-3"></div>
+                        <div class="terminal-title">chode --interactive</div>
+                    </div>
+                    <div class="terminal-body">
+                        <div><span class="prompt">chode &gt;</span> <span class="typed">port all skills from openclaw</span></div>
+                        <div style="color: var(--text-muted);">[info] Scanning local environment...</div>
+                        <div style="color: var(--text-muted);">[info] Found 97 unique skills.</div>
+                        <div style="color: var(--primary);">[success] Ported 97 skills to ~/.chode/skills/</div>
+                        <div><span class="prompt">chode &gt;</span> <span class="typed">apply bespoke-web-design</span></div>
+                        <div style="color: var(--text-muted);">[info] Loading editorial layouts & custom grids...</div>
+                        <div style="color: var(--primary);">[success] site/chode.html redesigned with zero slop!</div>
+                        <div><span class="prompt">chode &gt;</span> <span class="cursor">_</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Stats Band -->
+        <section class="stats-band">
+            <div class="stat-card">
+                <div class="stat-val">100<span>+</span></div>
+                <div class="stat-label">Ported Skills</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val">0<span>%</span></div>
+                <div class="stat-label">Slop Tolerated</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val">100<span>%</span></div>
+                <div class="stat-label">Local Control</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-val">v0.4<span>.0</span></div>
+                <div class="stat-label">Current Version</div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="features" id="features">
+            <div class="section-header">
+                <h2 class="section-title">Engineered for <span>Builders</span></h2>
+                <p class="section-desc">We broke out of the standard AI template box. CHODE is built to act as a highly precise, professional extension of your local terminal workflow.</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-num">01</div>
+                    <h3>Surgical Edits</h3>
+                    <p>Uses precise string replacement instead of rewriting entire files. Faster, cleaner, and git-friendly with zero unrelated changes.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-num">02</div>
+                    <h3>Bespoke Design</h3>
+                    <p>Equipped with specialized playbooks for editorial typography, custom grid layouts, and high-fidelity interactions.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-num">03</div>
+                    <h3>Terminal Native</h3>
+                    <p>Runs directly in your terminal. Integrates seamlessly with your existing compilers, test runners, and local environment.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Interactive Playground -->
+        <section class="playground" id="playground">
+            <div class="playground-info">
+                <h2>Interactive <span>Playground</span></h2>
+                <p>Select a playbook below to see how CHODE executes tasks with surgical precision and zero slop.</p>
+                <div class="skills-grid">
+                    <div class="skill-item active" data-skill="bespoke">
+                        <span class="skill-name">Bespoke Web Design</span>
+                        <span class="skill-arrow">-></span>
+                    </div>
+                    <div class="skill-item" data-skill="theory">
+                        <span class="skill-name">Graphic Design Theory</span>
+                        <span class="skill-arrow">-></span>
+                    </div>
+                    <div class="skill-item" data-skill="interactions">
+                        <span class="skill-name">High-Fidelity Interactions</span>
+                        <span class="skill-arrow">-></span>
+                    </div>
+                </div>
+            </div>
+            <div class="playground-terminal">
+                <div class="terminal-header">
+                    <div class="dot dot-1"></div>
+                    <div class="dot dot-2"></div>
+                    <div class="dot dot-3"></div>
+                    <div class="terminal-title">chode --playground</div>
+                </div>
+                <div class="playground-terminal-body" id="playground-terminal-content">
+                    <!-- Content loaded dynamically -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer>
+            <div class="footer-logo">CHODE<span>.</span></div>
+            <div class="footer-copy">© 2026 CHODE. Built thick like a tuna can.</div>
+            <div class="footer-links">
+                <a href="#">GitHub</a>
+                <a href="#">Docs</a>
+                <a href="#">Discord</a>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Interactive Playground Terminal Content
+        const skillContent = {
+            bespoke: `<div><span class="prompt">chode &gt;</span> <span class="typed">skill bespoke-web-design</span></div>
+<div style="color: var(--text-muted);">[info] Loading bespoke-web-design playbook...</div>
+<div style="color: var(--text-muted);">[info] Applying asymmetric balance, fluid typography, and custom grid tracks...</div>
+<div style="color: var(--primary);">[success] Redesigned layout with editorial-grade typography and zero slop!</div>
+<div><span class="prompt">chode &gt;</span> <span class="cursor">_</span></div>`,
+            theory: `<div><span class="prompt">chode &gt;</span> <span class="typed">skill graphic-design-theory</span></div>
+<div style="color: var(--text-muted);">[info] Applying 60-30-10 color rule and Gestalt proximity scales...</div>
+<div style="color: var(--text-muted);">[info] Aligning elements along strict vertical and horizontal axes...</div>
+<div style="color: var(--primary);">[success] Visual hierarchy established. Focal points optimized.</div>
+<div><span class="prompt">chode &gt;</span> <span class="cursor">_</span></div>`,
+            interactions: `<div><span class="prompt">chode &gt;</span> <span class="typed">skill high-fidelity-interactions</span></div>
+<div style="color: var(--text-muted);">[info] Injecting custom cubic-bezier curves and staggered reveals...</div>
+<div style="color: var(--text-muted);">[info] Enabling hardware-accelerated transform transitions...</div>
+<div style="color: var(--primary);">[success] Tactile hover states and fluid motion curves applied successfully!</div>
+<div><span class="prompt">chode &gt;</span> <span class="cursor">_</span></div>`
+        };
+
+        // Initialize terminal content
+        document.getElementById('playground-terminal-content').innerHTML = skillContent.bespoke;
+
+        // Handle skill item clicks
+        const items = document.querySelectorAll('.skill-item');
+        items.forEach(item => {
+            item.addEventListener('click', () => {
+                items.forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                const skill = item.getAttribute('data-skill');
+                document.getElementById('playground-terminal-content').innerHTML = skillContent[skill];
+            });
+        });
+
+        // Simple cursor blink animation
+        setInterval(() => {
+            const cursors = document.querySelectorAll('.cursor');
+            cursors.forEach(cursor => {
+                cursor.style.opacity = cursor.style.opacity === '0' ? '1' : '0';
+            });
+        }, 500);
+    </script>
+</body>
+</html>
