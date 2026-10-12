@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chode"
+version = "1.0.0"
+description = "CHODE — code thicc like a tuna can. A local-first, provider-agnostic agentic coding harness that keeps your repos in ORDER."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Chad Keith" }]
+keywords = ["ai", "agent", "coding-assistant", "cli", "llm", "mcp", "claude", "openai", "gemini", "ollama"]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Software Development",
+]
+dependencies = ["requests>=2.25"]
+
+[project.optional-dependencies]
+images = ["pillow>=9"]
+dev = ["pytest>=7", "pillow>=9", "build"]
+
+[project.scripts]
+chode = "chode.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/chchchadzilla/chode"
+Repository = "https://github.com/chchchadzilla/chode"
+Issues = "https://github.com/chchchadzilla/chode/issues"
+Changelog = "https://github.com/chchchadzilla/chode/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+packages = ["chode"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
