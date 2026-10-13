@@ -1,29 +1,10 @@
 #!/usr/bin/env bash
-# chode-start — plays a splash video, fades to black, then launches Chad Code.
-#
-# Splash file resolution order:
-#   $CHODE_SPLASH  →  ~/.chode/splash.mp4  →  ./splash.mp4 (next to this script)
-# Skips silently if no video, no TTY, or no renderer is available.
-#
-# Renderers (best available wins):
-#   1. chode_splash.py + ffmpeg   — plays the video IN the terminal, with fade-out
-#   2. mpv --vo=tct              — mpv's own terminal video output
-#   3. ffplay (GUI window)       — plain fullscreen playback
+# chode-start — launch CHODE from this checkout (macOS/Linux). Plays ~/.chode/splash.mp4 first if you have one.
 set -u
-
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SPLASH="${CHODE_SPLASH:-$HOME/.chode/splash.mp4}"
-[ -f "$SPLASH" ] || SPLASH="$DIR/splash.mp4"
-
-if [ -t 1 ] && [ -f "$SPLASH" ] && [ "${CHODE_NO_SPLASH:-}" != "1" ]; then
-  if command -v ffmpeg >/dev/null 2>&1; then
-    python3 "$DIR/chode_splash.py" "$SPLASH"
-  elif command -v mpv >/dev/null 2>&1; then
-    mpv --vo=tct --really-quiet --length=10 "$SPLASH" 2>/dev/null
-    clear
-  elif command -v ffplay >/dev/null 2>&1; then
-    ffplay -autoexit -fs -loglevel quiet "$SPLASH"
-  fi
+PY="$(command -v python3 || command -v python)"
+if [ -z "$PY" ]; then
+  echo "CHODE needs Python 3.9+. Get it at https://www.python.org/downloads/ (or: brew install python3 / sudo apt install python3)"
+  exit 1
 fi
-
-exec python3 "$DIR/chode.py" "$@"
+exec "$PY" "$DIR/chode-launcher.py" "$@"

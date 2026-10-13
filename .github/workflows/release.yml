@@ -1,0 +1,43 @@
+name: release
+
+# Opt-in only (no GitHub Actions minutes are spent unless you ask for it).
+# Releases are normally cut by hand: Releases → "Draft a new release" → tag vX.Y.Z →
+# paste .github/release-body.md → attach the wheel + sdist from `python -m build` → Publish.
+# If you'd rather have a runner do it: Actions tab → release → "Run workflow" → tag.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag (e.g. v1.0.0) — created at this commit if it doesn't exist"
+        required: true
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: build
+        run: |
+          pip install build
+          python -m build
+      - name: smoke-test the wheel
+        run: |
+          pip install dist/*.whl
+          chode --version
+      - name: create the GitHub release + attach wheel and sdist
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: CHODE ${{ github.event.inputs.tag }} — code thicc like a tuna can
+          body_path: .github/release-body.md
+          files: dist/*
+          make_latest: true
+          fail_on_unmatched_files: true

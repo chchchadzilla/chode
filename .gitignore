@@ -1,12 +1,20 @@
-# dependencies & system
+# python
 __pycache__/
 *.py[cod]
 *$py.class
 /.venv
 /venv
 /env
+/dist
+/build
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# OS specific
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -15,11 +23,28 @@ __pycache__/
 ehthumbs.db
 Thumbs.db
 
-# Large media assets (splash video is optional/user-provided)
+# editors
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+
+# env & secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# optional splash video (user-provided)
 splash.mp4
 
-# Config & local runtime sessions
+# chode local state (index, project config, backups live in ~/.chode)
 .chode/
-sessions/
-checkpoints/
-*.db
+chode-transcript-*.md
+CHODE-memory.md
+
+# logs
+*.log
+logs/

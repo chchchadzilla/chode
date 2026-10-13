@@ -1,66 +1,49 @@
 #!/usr/bin/env python3
-"""
-chode-start — Cross-platform splash launcher for Chad Code (CHODE v0.5.0)
-Works seamlessly across macOS, Linux, and Windows.
-"""
+"""chode-launcher.py â€” run CHODE straight from a git checkout, no install needed.
 
+    python3 chode-launcher.py            # menu
+    python3 chode-launcher.py -p "hi"    # one-shot
+
+Optional terminal splash video: drop an .mp4 at ~/.chode/splash.mp4 (needs ffmpeg).
+"""
 import os
-import sys
 import shutil
 import subprocess
-import platform
+import sys
 from pathlib import Path
 
+HERE = Path(__file__).parent.resolve()
+
+
+def _splash():
+    if os.environ.get("CHODE_NO_SPLASH") == "1" or not sys.stdout.isatty():
+        return
+    splash = Path(os.environ.get("CHODE_SPLASH") or (Path.home() / ".chode" / "splash.mp4"))
+    if not splash.exists():
+        splash = HERE / "splash.mp4"
+    if not splash.exists():
+        return
+    player = HERE / "chode_splash.py"
+    try:
+        if shutil.which("ffmpeg") and player.exists():
+            subprocess.run([sys.executable, str(player), str(splash)], check=False)
+        elif shutil.which("mpv"):
+            subprocess.run(["mpv", "--vo=tct", "--really-quiet", "--length=10", str(splash)], check=False)
+    except Exception:
+        pass
+
+
 def main():
-    script_dir = Path(__file__).parent.resolve()
-    
-    # 1. Resolve splash file
-    splash_env = os.environ.get("CHODE_SPLASH")
-    if splash_env:
-        splash_path = Path(splash_env)
-    else:
-        splash_path = Path.home() / ".chode" / "splash.mp4"
-        if not splash_path.exists():
-            splash_path = script_dir / "splash.mp4"
+    try:
+        import requests  # noqa: F401
+    except ImportError:
+        print("CHODE needs one package. Installing it now:  pip install requests")
+        subprocess.call([sys.executable, "-m", "pip", "install", "--user", "requests"])
+    _splash()
+    sys.path.insert(0, str(HERE))
+    from chode.cli import main as chode_main
+    chode_main()
 
-    skip_splash = os.environ.get("CHODE_NO_SPLASH") == "1"
-    
-    # 2. Render splash if video exists and stdout is interactive TTY
-    if splash_path.exists() and not skip_splash and sys.stdout.isatty():
-        chode_splash_py = script_dir / "chode_splash.py"
-        ffmpeg_bin = shutil.which("ffmpeg")
-        mpv_bin = shutil.which("mpv")
-        ffplay_bin = shutil.which("ffplay")
-
-        if ffmpeg_bin and chode_splash_py.exists():
-            try:
-                subprocess.run([sys.executable, str(chode_splash_py), str(splash_path)], check=False)
-            except Exception:
-                pass
-        elif mpv_bin:
-            try:
-                subprocess.run([mpv_bin, "--vo=tct", "--really-quiet", "--length=10", str(splash_path)], check=False)
-            except Exception:
-                pass
-        elif ffplay_bin:
-            try:
-                subprocess.run([ffplay_bin, "-autoexit", "-fs", "-loglevel", "quiet", str(splash_path)], check=False)
-            except Exception:
-                pass
-
-    # 3. Launch main CHODE process
-    chode_py = script_dir / "chode.py"
-    if not chode_py.exists():
-        print(f"Error: chode.py not found at {chode_py}")
-        sys.exit(1)
-
-    cmd = [sys.executable, str(chode_py)] + sys.argv[1:]
-    
-    # On POSIX (Mac/Linux), replace process; on Windows, run and exit
-    if os.name != "nt":
-        os.execv(sys.executable, cmd)
-    else:
-        sys.exit(subprocess.call(cmd))
 
 if __name__ == "__main__":
     main()
