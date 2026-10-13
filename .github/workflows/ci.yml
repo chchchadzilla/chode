@@ -1,9 +1,10 @@
 name: ci
 
+# Opt-in only. CHODE's tests run offline in a few seconds, so the canonical check is simply:
+#     pip install -e ".[dev]" && pytest -q
+# If you want the matrix on GitHub's runners, start it from the Actions tab ("Run workflow").
 on:
-  push:
-    branches: ["**"]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:

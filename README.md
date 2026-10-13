@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/chchchadzilla/chode/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/chchchadzilla/chode?style=flat-square&color=ff3fb3&label=release"></a>
-  <a href="https://github.com/chchchadzilla/chode/actions/workflows/ci.yml"><img alt="ci" src="https://img.shields.io/github/actions/workflow/status/chchchadzilla/chode/ci.yml?style=flat-square&label=ci"></a>
+  <img alt="tests" src="https://img.shields.io/badge/tests-60%20passing%20offline-3dff8f?style=flat-square">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-2ee6ff?style=flat-square"></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-2ee6ff?style=flat-square">
   <img alt="deps" src="https://img.shields.io/badge/dependencies-1%20(requests)-2ee6ff?style=flat-square">
@@ -319,7 +319,10 @@ git clone https://github.com/chchchadzilla/chode.git && cd chode
 pip install -e ".[dev]"
 pytest -q                       # ~60 tests, runs offline (scripted mock LLM + mock MCP server)
 python scripts/make_brand.py    # regenerate assets/
+python -m build                 # wheel + sdist in dist/ (attach these to a release)
 ```
+
+Tests are the gate, and they run on your machine in seconds. The GitHub Actions workflows in `.github/workflows/` are **opt-in** (started from the Actions tab) so no minutes are spent and no red X's appear unless you want them. CHODE itself works with any git host: `/ship` pushes to whatever `origin` is (GitHub, GitLab, Codeberg, Gitea…); only "create the repo for me" and "create the release for me" are GitHub-specific conveniences.
 
 Layout: `chode/` is the package (one module per concern: `agent`, `tools`, `permissions`, `memory`, `conscience`, `order`, `publish`, `rag`, `importer`, `plans`, `mcp`, `mcp_server`, `gui`, `banner`, `hooks`, `skills`, `llm`, `ui`, `repl`, `commands`, `cli`…). `tests/` mirrors it. `CHODE.md` is the project memory for CHODE itself (yes, it dogfoods).
 

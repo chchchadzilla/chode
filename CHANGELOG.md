@@ -61,7 +61,8 @@ twelve new feature areas, a test suite, CI, a browser GUI and a real brand.
   pages, sensitive-path warnings, config `chmod 600`, secret scan before every commit, ~15 more
   dangerous-command patterns (git reset --hard, cloud deletes, package publishing, DROP TABLE…).
 - Packaging: `pyproject.toml`, `pip install`/`pipx` support, `chode` console script, `python -m chode`,
-  `install.sh` / `install.ps1`, GitHub Actions CI (3 OSes × 3 Pythons) and release workflow.
+  `install.sh` / `install.ps1`. Opt-in GitHub Actions workflows (3 OSes × 3 Pythons CI, and a release
+  builder) — started manually from the Actions tab, never on push, so they cost nothing by default.
 - Tests: 60 offline tests (scripted mock LLM with streaming, mock MCP server, CHODE-as-MCP, GUI).
 - Docs: rebuilt README, ABOUT.md, CONTRIBUTING, SECURITY, CHODE.md, docs/.
 

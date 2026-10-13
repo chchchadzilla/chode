@@ -1,11 +1,10 @@
 name: release
 
-# Runs when a v* tag is pushed, OR on demand from the Actions tab ("Run workflow" → tag: v1.2.3).
-# Builds the wheel + sdist, creates the GitHub release (and the tag, if it doesn't exist yet)
-# with the notes from .github/release-body.md, and attaches the artifacts.
+# Opt-in only (no GitHub Actions minutes are spent unless you ask for it).
+# Releases are normally cut by hand: Releases → "Draft a new release" → tag vX.Y.Z →
+# paste .github/release-body.md → attach the wheel + sdist from `python -m build` → Publish.
+# If you'd rather have a runner do it: Actions tab → release → "Run workflow" → tag.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
@@ -35,9 +34,9 @@ jobs:
       - name: create the GitHub release + attach wheel and sdist
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ github.event.inputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: CHODE ${{ github.event.inputs.tag || github.ref_name }} — code thicc like a tuna can
+          name: CHODE ${{ github.event.inputs.tag }} — code thicc like a tuna can
           body_path: .github/release-body.md
           files: dist/*
           make_latest: true
