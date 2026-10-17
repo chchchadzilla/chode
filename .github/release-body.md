@@ -1,4 +1,6 @@
-**CHODE 1.0.0 — code thicc like a tuna can.** 🥫
+**CHODE 1.0.1 — code thicc like a tuna can.** 🥫
+
+> 1.0.1 adds **the lifeline**: retries with backoff, classified errors with plain-English hints, model-name auto-correction, a fallback ladder that ends in a free keyless model, a startup guarantee, and `chode fix` — a connection doctor that repairs your config on whatever model answers. No API key? `chode setup → "Just make it work (free)"`.
 
 The coding harness that works with any AI, rides the subscription you already pay for, imports your gear from every other coding agent in one click, remembers you between sessions, and keeps every repo in ORDER.
 

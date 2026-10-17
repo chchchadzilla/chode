@@ -2,24 +2,45 @@
 
 Messages are kept in a canonical OpenAI-ish format and converted per API style,
 so you can switch providers/models mid-conversation. Streaming for both styles.
+
+Resilience (the lifeline):
+  * network errors, 429s and 5xxs are retried with exponential backoff (Retry-After honored)
+  * every failure is classified (auth · not_found · rate_limit · overloaded · network …) and
+    carries a plain-English hint with the provider's docs URL
+  * a rejected model name is auto-corrected against the live model list
+  * when a provider is truly dead for this session, the client walks the fallback ladder
+    (other keys → local servers → keyless free) and keeps going
 """
 import json
 import time
 
 import requests
 
-from .config import PROVIDERS, api_key_for, price_for, resolve_model
+from .config import MODEL_FALLBACKS, PROVIDERS, api_key_for, price_for, resolve_model
 from .ui import dim
 
 
 class LLMError(Exception):
-    pass
+    def __init__(self, msg, kind="unknown", status=None, provider="", model="", hint=""):
+        super().__init__(msg)
+        self.kind = kind
+        self.status = status
+        self.provider = provider
+        self.model = model
+        self.hint = hint
+
+    def pretty(self):
+        head = f"[{self.kind}] {self}"
+        return head + (f"\n  → {self.hint}" if self.hint else "")
 
 
 CONTEXT_WINDOWS = [("claude", 200_000), ("gpt-5", 400_000), ("gpt-4.1", 1_000_000), ("gpt-4o", 128_000),
                    ("o3", 200_000), ("o4", 200_000), ("gemini", 1_000_000), ("grok-4", 256_000),
                    ("grok", 131_072), ("deepseek", 128_000), ("kimi", 256_000), ("qwen3", 128_000),
                    ("llama", 128_000), ("devstral", 128_000), ("mistral", 128_000)]
+
+_NET_EXC = (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError)
 
 
 def context_window(model):
@@ -31,7 +52,8 @@ def context_window(model):
 
 
 class LLMClient:
-    RETRY_CODES = {408, 409, 429, 500, 502, 503, 504, 529}
+    RETRY_CODES = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+    MAX_PROVIDER_SWITCHES = 4
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -42,6 +64,12 @@ class LLMClient:
         self.last_input_tokens = 0
         self.calls = 0
         self._plan = None
+        self.allow_fallback = True
+        self.on_fallback = None          # callable(note) — the UI shows what happened
+        self.fallback_notes = []
+        self.switched_from = None        # (provider, model) we started the session with
+        self._corrected = {}             # provider -> set of model names already tried
+        self._good = None                # (provider, model) last remembered as working
 
     @property
     def provider(self): return self.cfg["provider"]
@@ -81,7 +109,6 @@ class LLMClient:
                     out[-1]["content"].append(block)
                 else:
                     out.append({"role": "user", "content": [block]})
-        # Anthropic requires alternating roles starting with user; merge adjacent users.
         merged = []
         for m in out:
             if merged and merged[-1]["role"] == m["role"] == "user":
@@ -107,17 +134,47 @@ class LLMClient:
                 out.append({"role": "user", "content": m["content"]})
         return out
 
-    # -- calls ----------------------------------------------------------------
+    # -- the resilient entry point --------------------------------------------
 
     def chat(self, system, messages, tools=None, on_text=None):
         """Returns {"content": str, "tool_calls": [{"id","name","arguments"}]}.
-        on_text(delta) is called as text streams in (when streaming is on)."""
+        on_text(delta) is called as text streams in (when streaming is on).
+        Walks the fallback ladder when the provider is unusable (unless allow_fallback is False)."""
         self.calls += 1
+        switches = 0
+        tried = set()
+        while True:
+            try:
+                resp = self._chat_once(system, messages, tools, on_text)
+                self._remember_good()
+                return resp
+            except LLMError as e:
+                fb = self.cfg.get("fallbacks", "auto")
+                if not self.allow_fallback or fb is False or fb == "off":
+                    raise
+                if e.kind == "not_found" and self._autocorrect_model(e):
+                    continue
+                tried.add(self.provider)
+                if switches >= self.MAX_PROVIDER_SWITCHES:
+                    raise
+                from . import lifeline
+                cands = lifeline.ladder(self.cfg, exclude=tried)
+                if not cands:
+                    e.hint = (e.hint + "\n  → nothing else is reachable: " if e.hint else "") + lifeline.playbook(self.cfg, e)
+                    raise e
+                np_, nm = cands[0]
+                self._switch(np_, nm, reason=e)
+                switches += 1
+
+    def _chat_once(self, system, messages, tools, on_text):
         if self.api_style == "plan":
             from .plans import PlanClient
             if self._plan is None or self._plan.provider != self.provider:
                 self._plan = PlanClient(self.cfg, self.provider)
-            resp = self._plan.chat(system, messages, on_text=on_text)
+            try:
+                resp = self._plan.chat(system, messages, on_text=on_text)
+            except RuntimeError as e:
+                raise LLMError(str(e), kind="network", provider=self.provider, hint=str(e))
             self._track(resp.get("usage_in", 0), resp.get("usage_out", 0), cost=resp.get("cost"))
             return {"content": resp["content"], "tool_calls": []}
         stream = bool(self.cfg.get("stream", True) and on_text)
@@ -125,47 +182,118 @@ class LLMClient:
             return self._chat_anthropic(system, messages, tools, on_text if stream else None)
         return self._chat_openai(system, messages, tools, on_text if stream else None)
 
-    def _post(self, url, headers, payload, stream=False):
-        last_err = None
-        for attempt in range(4):
+    def _notify(self, note):
+        self.fallback_notes.append(note)
+        if self.on_fallback:
             try:
-                r = requests.post(url, headers=headers, json=payload, timeout=600, stream=stream)
-            except requests.exceptions.ConnectionError:
-                raise LLMError(f"Could not connect to {url} — is the server running? (see /config)")
-            except requests.exceptions.Timeout:
-                raise LLMError("Request timed out.")
-            if r.status_code in self.RETRY_CODES and attempt < 3:
-                wait = 2 * (attempt + 1)
+                self.on_fallback(note)
+            except Exception:
+                pass
+
+    def _autocorrect_model(self, err):
+        """The provider doesn't know this model: find the right name from the live list, else try the
+        provider's known fallbacks. Returns True if a new model was set."""
+        from . import lifeline
+        tried = self._corrected.setdefault(self.provider, set())
+        tried.add(self.model)
+        available = []
+        try:
+            available = [m for m in self.list_models() if m]
+        except LLMError:
+            pass
+        new = lifeline.correct_model(self.model, available, self.provider) if available else None
+        if not new or new in tried:
+            new = next((m for m in MODEL_FALLBACKS.get(self.provider, []) if m not in tried and (not available or m in available)), None)
+        if not new:
+            return False
+        old = self.model
+        self.cfg["model"] = new
+        self._notify(f"model '{old}' isn't available on {self.provider} → using '{new}' instead")
+        return True
+
+    def _switch(self, provider, model, reason=None):
+        if self.switched_from is None:
+            self.switched_from = (self.provider, self.cfg.get("model", ""))
+            self.cfg["_fallback_from"] = self.provider
+            self.cfg["_fallback_model"] = self.cfg.get("model", "")
+        why = f"{reason.kind}: {str(reason)[:120]}" if reason is not None else "unusable"
+        self.cfg["provider"], self.cfg["model"] = provider, model or ""
+        self._plan = None
+        self._notify(f"{self.switched_from[0] if self.switched_from else '?'} failed ({why}) → falling back to "
+                     f"{provider}{(' / ' + model) if model else ''}" + (f"\n  → {reason.hint}" if reason is not None and reason.hint else ""))
+
+    def _remember_good(self):
+        key = (self.provider, self.cfg.get("model", ""))
+        if self._good != key and self.api_style != "plan":
+            self._good = key
+            from . import lifeline
+            lifeline.remember_good(self.cfg, *key)
+
+    # -- HTTP with retries ------------------------------------------------------
+
+    def _post(self, url, headers, payload, stream=False):
+        from . import lifeline
+        retries = max(0, int(self.cfg.get("retries", 3) or 0))
+        last_err = None
+        for attempt in range(retries + 1):
+            try:
+                r = requests.post(url, headers=headers, json=payload, timeout=(15, 600), stream=stream)
+            except _NET_EXC as e:
+                last_err = e
+                if attempt < retries:
+                    wait = 1.5 * (2 ** attempt)
+                    print(dim(f"\r  can't reach {self.provider} ({type(e).__name__}), retrying in {wait:.0f}s…"))
+                    time.sleep(wait)
+                    continue
+                raise LLMError(f"Could not reach {url} ({type(e).__name__})", kind="network", provider=self.provider,
+                               model=self.model, hint=lifeline.hint("network", self.provider, self.model))
+            if r.status_code < 400:
+                return r
+            body = r.text[:1200]
+            kind = lifeline.classify(r.status_code, body)
+            retryable = r.status_code in self.RETRY_CODES and kind not in ("auth", "not_found") and \
+                not any(s in body.lower() for s in ("insufficient_quota", "billing", "exceeded your current quota"))
+            if retryable and attempt < retries:
+                ra = r.headers.get("Retry-After")
+                try:
+                    wait = min(20.0, float(ra)) if ra else 2.0 * (attempt + 1)
+                except ValueError:
+                    wait = 2.0 * (attempt + 1)
                 last_err = f"HTTP {r.status_code}"
-                print(dim(f"\r  {last_err}, retrying in {wait}s…"))
+                print(dim(f"\r  {self.provider}: {last_err}, retrying in {wait:.0f}s…"))
                 time.sleep(wait)
                 continue
-            if r.status_code >= 400:
-                detail = r.text[:800]
-                try:
-                    j = r.json()
-                    detail = json.dumps(j.get("error", j), indent=2)[:800]
-                except Exception:
-                    pass
-                raise LLMError(f"HTTP {r.status_code} from {self.provider}: {detail}")
-            return r
-        raise LLMError(f"gave up after retries ({last_err})")
+            detail = body
+            try:
+                j = r.json()
+                detail = json.dumps(j.get("error", j), indent=2)[:800]
+            except Exception:
+                pass
+            raise LLMError(f"HTTP {r.status_code} from {self.provider}: {detail}", kind=kind, status=r.status_code,
+                           provider=self.provider, model=self.model,
+                           hint=lifeline.hint(kind, self.provider, self.model, detail))
+        raise LLMError(f"gave up after retries ({last_err})", kind="overloaded", provider=self.provider, model=self.model,
+                       hint=lifeline.hint("overloaded", self.provider, self.model))
 
-    @staticmethod
-    def _sse(resp):
-        """Yield parsed JSON objects from an SSE stream."""
-        for raw in resp.iter_lines(decode_unicode=True):
-            if not raw:
-                continue
-            line = raw.strip()
-            if line.startswith("data:"):
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    return
-                try:
-                    yield json.loads(data)
-                except json.JSONDecodeError:
+    def _sse(self, resp):
+        """Yield parsed JSON objects from an SSE stream; network drops become LLMError(network)."""
+        try:
+            for raw in resp.iter_lines(decode_unicode=True):
+                if not raw:
                     continue
+                line = raw.strip()
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        return
+                    try:
+                        yield json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+        except _NET_EXC as e:
+            from . import lifeline
+            raise LLMError(f"stream from {self.provider} was cut off ({type(e).__name__})", kind="network",
+                           provider=self.provider, model=self.model, hint=lifeline.hint("network", self.provider, self.model))
 
     # ---- anthropic ----
     def _chat_anthropic(self, system, messages, tools, on_text):
@@ -179,32 +307,14 @@ class LLMClient:
                    "content-type": "application/json"}
         url = f"{self.base_url}/v1/messages"
         if not on_text:
-            data = self._post(url, headers, payload).json()
-            text_parts, tool_calls = [], []
-            for block in data.get("content", []):
-                if block.get("type") == "text":
-                    text_parts.append(block["text"])
-                elif block.get("type") == "tool_use":
-                    tool_calls.append({"id": block["id"], "name": block["name"], "arguments": block.get("input") or {}})
-            usage = data.get("usage", {})
-            self._track(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            return {"content": "\n".join(text_parts), "tool_calls": tool_calls}
+            return self._parse_anthropic(self._post(url, headers, payload).json())
         payload["stream"] = True
         r = self._post(url, headers, payload, stream=True)
         if "text/event-stream" not in (r.headers.get("Content-Type") or ""):
-            # server ignored `stream` and answered with plain JSON — handle it gracefully
-            data = r.json()
-            text_parts, tool_calls = [], []
-            for block in data.get("content", []):
-                if block.get("type") == "text":
-                    text_parts.append(block["text"])
-                elif block.get("type") == "tool_use":
-                    tool_calls.append({"id": block["id"], "name": block["name"], "arguments": block.get("input") or {}})
-            usage = data.get("usage", {})
-            self._track(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
-            if text_parts:
-                on_text("".join(text_parts))
-            return {"content": "\n".join(text_parts), "tool_calls": tool_calls}
+            parsed = self._parse_anthropic(r.json())
+            if parsed["content"]:
+                on_text(parsed["content"])
+            return parsed
         text_parts, tool_calls = [], []
         cur_tool, cur_json = None, []
         tin = tout = 0
@@ -236,19 +346,39 @@ class LLMClient:
             elif t == "message_delta":
                 tout = (ev.get("usage") or {}).get("output_tokens", tout)
             elif t == "error":
-                raise LLMError(f"stream error: {json.dumps(ev.get('error'))[:400]}")
+                err = ev.get("error") or {}
+                etype = str(err.get("type", ""))
+                kind = {"overloaded_error": "overloaded", "rate_limit_error": "rate_limit", "not_found_error": "not_found",
+                        "authentication_error": "auth", "permission_error": "auth", "api_error": "overloaded"}.get(etype, "unknown")
+                from . import lifeline
+                raise LLMError(f"stream error from {self.provider}: {json.dumps(err)[:300]}", kind=kind, provider=self.provider,
+                               model=self.model, hint=lifeline.hint(kind, self.provider, self.model, json.dumps(err)))
         self._track(tin, tout)
         return {"content": "".join(text_parts), "tool_calls": tool_calls}
+
+    def _parse_anthropic(self, data):
+        text_parts, tool_calls = [], []
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                text_parts.append(block["text"])
+            elif block.get("type") == "tool_use":
+                tool_calls.append({"id": block["id"], "name": block["name"], "arguments": block.get("input") or {}})
+        usage = data.get("usage", {})
+        self._track(usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+        return {"content": "\n".join(text_parts), "tool_calls": tool_calls}
 
     # ---- openai-compatible ----
     def _openai_headers_url(self):
         if self.api_style == "azure":
             if not self.base_url:
-                raise LLMError("azure needs a base URL like https://RESOURCE.openai.azure.com/openai/deployments/DEPLOYMENT — set it with: /config base_urls.azure <url> (or chode setup)")
+                raise LLMError("azure needs a base URL like https://RESOURCE.openai.azure.com/openai/deployments/DEPLOYMENT — "
+                               "set it with: /config base_urls.azure <url> (or chode setup)", kind="bad_request", provider="azure")
             headers = {"api-key": self.api_key(), "Content-Type": "application/json"}
             url = f"{self.base_url}/chat/completions?api-version={self.cfg.get('azure_api_version', '2024-06-01')}"
         else:
-            headers = {"Authorization": f"Bearer {self.api_key()}", "Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json"}
+            if self.provider not in ("pollinations",) or api_key_for(self.cfg, self.provider):
+                headers["Authorization"] = f"Bearer {self.api_key()}"
             if self.provider == "openrouter":
                 headers["HTTP-Referer"] = "https://github.com/chchchadzilla/chode"
                 headers["X-Title"] = "CHODE"
@@ -257,7 +387,6 @@ class LLMClient:
 
     def _chat_openai(self, system, messages, tools, on_text):
         payload = {"model": self.model, "messages": self._to_openai(messages, system)}
-        # newer OpenAI reasoning models reject max_tokens/temperature; send the modern key
         if self.provider == "openai" and (self.model.startswith(("gpt-5", "o1", "o3", "o4"))):
             payload["max_completion_tokens"] = self.cfg["max_tokens"]
         else:
@@ -268,8 +397,7 @@ class LLMClient:
                 "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in tools]
         headers, url = self._openai_headers_url()
         if not on_text:
-            data = self._post(url, headers, payload).json()
-            return self._parse_openai(data)
+            return self._parse_openai(self._post(url, headers, payload).json())
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
         try:
@@ -287,6 +415,12 @@ class LLMClient:
             return parsed
         text_parts, tools_acc, usage = [], {}, {}
         for chunk in self._sse(r):
+            if chunk.get("error"):
+                from . import lifeline
+                err = chunk["error"]
+                kind = lifeline.classify(None, json.dumps(err))
+                raise LLMError(f"stream error from {self.provider}: {json.dumps(err)[:300]}", kind=kind, provider=self.provider,
+                               model=self.model, hint=lifeline.hint(kind, self.provider, self.model, json.dumps(err)))
             if chunk.get("usage"):
                 usage = chunk["usage"]
             for ch in chunk.get("choices") or []:
@@ -314,15 +448,19 @@ class LLMClient:
             tool_calls.append({"id": slot["id"] or f"call_{idx}", "name": slot["name"], "arguments": args})
         tin = usage.get("prompt_tokens", 0)
         tout = usage.get("completion_tokens", 0)
-        if not tin:  # server didn't report usage: rough estimate so the status line isn't blank
+        if not tin:
             tin = sum(len(m.get("content") or "") for m in messages) // 4 + len(system) // 4
             tout = len("".join(text_parts)) // 4
         self._track(tin, tout)
         return {"content": "".join(text_parts), "tool_calls": tool_calls}
 
     def _parse_openai(self, data):
-        if not data.get("choices"):
-            raise LLMError(f"No choices in response: {json.dumps(data)[:500]}")
+        if not isinstance(data, dict) or not data.get("choices"):
+            from . import lifeline
+            body = json.dumps(data)[:500]
+            kind = lifeline.classify(None, body) if isinstance(data, dict) and data.get("error") else "unknown"
+            raise LLMError(f"No choices in response from {self.provider}: {body}", kind=kind, provider=self.provider,
+                           model=self.model, hint=lifeline.hint(kind, self.provider, self.model, body))
         msg = data["choices"][0].get("message") or {}
         tool_calls = []
         for tc in msg.get("tool_calls") or []:
@@ -355,6 +493,8 @@ class LLMClient:
         line = f"tokens: {self.total_in:,} in / {self.total_out:,} out"
         if self.api_style == "plan":
             return line + "   cost: covered by your subscription"
+        if self.provider in ("ollama", "lmstudio", "local", "pollinations"):
+            return line + "   cost: $0 (free)"
         if self.total_cost and self.cost_known:
             line += f"   est. cost: ${self.total_cost:.4f}"
         elif self.total_cost:
@@ -363,32 +503,75 @@ class LLMClient:
             line += "   est. cost: unknown for this model (or free/local)"
         return line
 
-    def list_models(self):
-        if self.api_style == "plan":
+    # -- discovery ----------------------------------------------------------------
+
+    def list_models(self, provider=None):
+        """Model ids the provider advertises. Raises LLMError (classified) when it can't."""
+        from . import lifeline
+        prov = provider or self.provider
+        style, default_url, key_env, _ = PROVIDERS[prov]
+        base = (self.cfg.get("base_urls", {}).get(prov) or default_url).rstrip("/")
+        key = api_key_for(self.cfg, prov) or "not-needed"
+        if style == "plan":
             from .plans import PlanClient
-            return PlanClient(self.cfg, self.provider).list_models()
-        if self.api_style == "anthropic":
-            headers = {"x-api-key": self.api_key(), "anthropic-version": "2023-06-01"}
-            url = f"{self.base_url}/v1/models"
-        elif self.api_style == "azure":
-            headers = {"api-key": self.api_key()}
-            url = f"{self.base_url}/models?api-version={self.cfg.get('azure_api_version', '2024-06-01')}"
+            return PlanClient(self.cfg, prov).list_models()
+        if style == "anthropic":
+            headers = {"x-api-key": key, "anthropic-version": "2023-06-01"}
+            url = f"{base}/v1/models?limit=100"
+        elif style == "azure":
+            headers = {"api-key": key}
+            url = f"{base}/models?api-version={self.cfg.get('azure_api_version', '2024-06-01')}"
+        elif prov == "pollinations":
+            headers = {}
+            url = base.rsplit("/openai", 1)[0] + "/models"
         else:
-            headers = {"Authorization": f"Bearer {self.api_key()}"}
-            url = f"{self.base_url}/models"
+            headers = {"Authorization": f"Bearer {key}"}
+            url = f"{base}/models"
         try:
-            r = requests.get(url, headers=headers, timeout=30)
-            r.raise_for_status()
+            r = requests.get(url, headers=headers, timeout=20)
+        except _NET_EXC as e:
+            raise LLMError(f"could not reach {prov} to list models ({type(e).__name__})", kind="network", provider=prov,
+                           hint=lifeline.hint("network", prov))
+        if r.status_code >= 400:
+            kind = lifeline.classify(r.status_code, r.text[:500])
+            raise LLMError(f"HTTP {r.status_code} listing {prov} models: {r.text[:300]}", kind=kind, status=r.status_code,
+                           provider=prov, hint=lifeline.hint(kind, prov, "", r.text[:200]))
+        try:
             data = r.json()
+        except Exception:
+            raise LLMError(f"{prov} returned a non-JSON model list", kind="unknown", provider=prov)
+        if isinstance(data, list):
+            items = data
+        else:
             items = data.get("data") or data.get("models") or []
-            return [m.get("id") or m.get("name", "?") for m in items]
-        except Exception as e:
-            raise LLMError(f"Could not list models: {e}")
+        out = []
+        for m in items:
+            if isinstance(m, str):
+                out.append(m)
+            elif isinstance(m, dict):
+                out.append(m.get("id") or m.get("name") or m.get("model") or "")
+        return [m for m in out if m]
+
+    def probe(self):
+        """A one-token round trip. Returns (ok, LLMError_or_None). Never falls back."""
+        old = self.allow_fallback
+        self.allow_fallback = False
+        old_max = self.cfg["max_tokens"]
+        self.cfg["max_tokens"] = 16
+        try:
+            self.chat("Reply with exactly: pong", [{"role": "user", "content": "ping"}], tools=None)
+            return True, None
+        except LLMError as e:
+            return False, e
+        finally:
+            self.allow_fallback = old
+            self.cfg["max_tokens"] = old_max
 
     def embed(self, texts, model=None):
         """Embeddings via an OpenAI-compatible /embeddings endpoint (OpenAI, Ollama, LM Studio…)."""
         if self.api_style not in ("openai", "azure"):
-            raise LLMError(f"provider '{self.provider}' has no embeddings endpoint — set rag.embedding_model and use an openai-style provider, or leave embeddings off")
+            raise LLMError(f"provider '{self.provider}' has no embeddings endpoint — set rag.embedding_model and use an "
+                           f"openai-style provider, or leave embeddings off", kind="bad_request", provider=self.provider)
         model = model or self.cfg.get("rag", {}).get("embedding_model") or (
             "text-embedding-3-small" if self.provider == "openai" else "nomic-embed-text")
         headers, _ = self._openai_headers_url()

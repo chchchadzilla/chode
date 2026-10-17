@@ -165,6 +165,28 @@ TOOLS = [
         "safe": False,
     },
     {
+        "name": "list_models",
+        "description": ("List the model ids a provider currently offers (defaults to the configured provider). Use when a "
+                        "model name is rejected, to pick a valid one."),
+        "input_schema": {"type": "object", "properties": {"provider": {"type": "string"}}},
+        "safe": True,
+    },
+    {
+        "name": "test_connection",
+        "description": ("Send a one-token test request to a provider/model (defaults to the configured ones). Returns ok, "
+                        "or the classified error kind + a hint. Use after changing config."),
+        "input_schema": {"type": "object", "properties": {"provider": {"type": "string"}, "model": {"type": "string"}}},
+        "safe": True,
+    },
+    {
+        "name": "set_config",
+        "description": ("Change a CHODE setting and save it: provider, model, base_urls.<provider>, fallbacks, stream, "
+                        "max_tokens, temperature, mode. Never API keys (the user pastes those in `chode setup`)."),
+        "input_schema": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
+                         "required": ["key", "value"]},
+        "safe": False,
+    },
+    {
         "name": "generate_image",
         "description": ("Generate an image (banner, logo, illustration) with an image model if an API key exists, "
                         "else a clean SVG/PNG from the built-in generator. Saves to `path` (.png or .svg)."),
@@ -534,6 +556,67 @@ def tool_generate_image(args):
     return f"{note}Generated → {p}"
 
 
+def tool_list_models(args):
+    from .config import PROVIDERS
+    from .llm import LLMClient, LLMError
+    a = _app()
+    prov = (args.get("provider") or a.cfg.get("provider") or "").strip()
+    if prov not in PROVIDERS:
+        return f"Error: unknown provider '{prov}'. Known: {', '.join(PROVIDERS)}"
+    try:
+        models = LLMClient(a.cfg).list_models(prov)
+    except LLMError as e:
+        return f"Could not list models for {prov}: {e.pretty()}"
+    if not models:
+        return f"{prov} returned an empty model list."
+    return f"{len(models)} model(s) on {prov}:\n" + "\n".join(models[:150])
+
+
+def tool_test_connection(args):
+    from .config import PROVIDERS
+    from .llm import LLMClient
+    a = _app()
+    cfg = dict(a.cfg)
+    if args.get("provider"):
+        if args["provider"] not in PROVIDERS:
+            return f"Error: unknown provider '{args['provider']}'"
+        cfg["provider"] = args["provider"]
+        cfg["model"] = ""
+    if args.get("model"):
+        cfg["model"] = args["model"]
+    client = LLMClient(cfg)
+    ok, err = client.probe()
+    if ok:
+        return f"OK — {client.provider} / {client.model} answered."
+    return f"FAILED — {err.pretty()}"
+
+
+SETTABLE = ("provider", "model", "fallbacks", "stream", "max_tokens", "temperature", "mode", "retries", "theme", "name")
+
+
+def tool_set_config(args):
+    from .config import PROVIDERS, save_config, set_config_path, MODES
+    a = _app()
+    key, value = (args.get("key") or "").strip(), str(args.get("value", "")).strip()
+    if key.startswith("api_keys") or "key" in key.lower().split(".")[-1]:
+        return "Refused: API keys are only ever entered by the user (chode setup)."
+    if not (key in SETTABLE or key.startswith("base_urls.") or key.startswith(("rag.", "plans.", "memory.", "order."))):
+        return f"Refused: '{key}' is not a setting the fixer may change. Allowed: {', '.join(SETTABLE)}, base_urls.*"
+    if key == "provider" and value not in PROVIDERS:
+        return f"Error: unknown provider '{value}'. Known: {', '.join(PROVIDERS)}"
+    if key == "mode" and value not in MODES:
+        return f"Error: mode must be one of {', '.join(MODES)}"
+    if key == "provider":
+        a.cfg["model"] = ""
+        a.cfg.pop("_fallback_from", None)
+        a.cfg.pop("_fallback_model", None)
+    set_config_path(a.cfg, key, value)
+    if a.client is not None:
+        a.client._plan = None
+    save_config(a.cfg)
+    return f"Set {key} = {value!r} and saved to config."
+
+
 TOOL_EXECUTORS = {
     "read_file": tool_read_file,
     "write_file": tool_write_file,
@@ -554,6 +637,9 @@ TOOL_EXECUTORS = {
     "backup": tool_backup,
     "ship": tool_ship,
     "generate_image": tool_generate_image,
+    "list_models": tool_list_models,
+    "test_connection": tool_test_connection,
+    "set_config": tool_set_config,
 }
 
 

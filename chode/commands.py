@@ -38,6 +38,7 @@ HELP = """
   {h}Brain{r}       /index   /search <query>   /skills [add <dir|url>]   /agents   /mcp [reload]   /hooks   /plans
   {h}Session{r}     /undo   /resume   /compact   /clear   /export [file]   /cost   /config [key value]   /permissions
   {h}Apps{r}        /gui   /ride claude|codex|gemini   /import   /doctor   /theme [color]   /intro   /help   /exit
+  {h}Lifeline{r}    /fix (repair the model connection)   /lifeline (what CHODE falls back to)   /provider keep
 """
 
 
@@ -96,16 +97,43 @@ def handle_slash(cmd, ctx):
             print(red(str(e)))
 
     elif name == "provider":
-        if rest:
+        if rest and rest[0] == "keep":
+            cfg.pop("_fallback_from", None)
+            cfg.pop("_fallback_model", None)
+            client.switched_from = None
+            save_config(cfg)
+            print(green(f"saved: {client.provider} / {client.model or '(default)'} is now your default"))
+        elif rest:
             p = rest[0].lower()
             if p not in PROVIDERS:
                 print(red(f"unknown provider. options: {', '.join(PROVIDERS)}"))
             else:
                 cfg["provider"] = p
                 cfg["model"] = rest[1] if len(rest) > 1 else ""
+                cfg.pop("_fallback_from", None)
+                cfg.pop("_fallback_model", None)
+                client.switched_from = None
                 save_config(cfg)
                 client._plan = None
-        print(f"provider: {bold(client.provider)}  model: {bold(client.model)}  url: {dim(client.base_url or '(cli)')}")
+        print(f"provider: {bold(client.provider)}  model: {bold(client.model or '(default)')}  url: {dim(client.base_url or '(cli)')}"
+              + (yellow("  [session fallback — /provider keep to save]") if cfg.get("_fallback_from") else ""))
+
+    elif name in ("fix", "lifeline", "fallbacks"):
+        from . import lifeline
+        if name == "fix":
+            print(dim("  🩹 running the connection doctor…"))
+            out = lifeline.run_fixer(cfg, ui=ui)
+            if out:
+                print("  " + out.strip().replace("\n", "\n  "))
+            client._plan = None
+            rebuild()
+        else:
+            print(bold("  🪢 lifeline ladder") + dim("  (what CHODE will try, in order, if the current provider fails)"))
+            for p, ok_, note in lifeline.status(cfg):
+                print(f"  {green('✓') if ok_ else dim('·')} {p:<12} {dim(note)}")
+            lad = lifeline.ladder(cfg)
+            print("  order now: " + (" → ".join(f"{p}{('/' + m) if m else ''}" for p, m in lad) if lad else dim("(fallbacks off)")))
+            print(dim("  /config fallbacks '[\"groq\",\"ollama\",\"pollinations\"]' to pin an order · /config fallbacks false to disable"))
 
     elif name == "skills":
         if rest and rest[0] == "add":
@@ -472,4 +500,4 @@ SLASH_NAMES = ["/help", "/mode", "/model", "/models", "/provider", "/skills", "/
                "/config", "/permissions", "/cost", "/clear", "/compact", "/init", "/memory", "/remember", "/memories",
                "/forget", "/conscience", "/ledger", "/status", "/order", "/about", "/tidy", "/backup", "/ship", "/release",
                "/banner", "/index", "/search", "/import", "/plans", "/ride", "/gui", "/doctor", "/diff", "/git", "/theme",
-               "/intro", "/export", "/commands", "/exit"]
+               "/intro", "/export", "/commands", "/fix", "/lifeline", "/exit"]

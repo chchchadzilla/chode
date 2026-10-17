@@ -22,6 +22,13 @@
 | `/plans` | detect installed plan CLIs; offer to switch |
 | `/ride claude\|codex\|gemini [args]` | open the vendor TUI with CHODE mounted via MCP |
 
+### Lifeline
+| command | |
+|---|---|
+| `/fix` | run the connection doctor: finds a model that answers, fixes provider/model, explains |
+| `/lifeline` (alias `/fallbacks`) | what can answer on this machine and the fallback order |
+| `/provider keep` | make the current session fallback your saved default |
+
 ### Memory & mindfulness
 | command | |
 |---|---|
@@ -105,6 +112,7 @@ chode [command] [args] [-p PROMPT] [-c] [--provider P] [--model M] [--mode MODE]
 | `banner [name]` · `ship [msg] [--no-push] [--force]` · `release vX.Y.Z [--draft]` | publish |
 | `gui [--port N]` | the Deck |
 | `mcp-serve [--mode M]` | run CHODE as an MCP server on stdio |
+| `fix` · `lifeline` | connection doctor · fallback ladder |
 | `skills [add\|remove …]` · `memory [export\|clear\|add …]` · `ledger [n]` · `conscience` · `about` · `version` | |
 
 Exit code of `chode health` is 0 when healthy, 1 otherwise (handy in scripts).

@@ -12,7 +12,7 @@ from .ui import bold, collision_intro, dim, red, set_theme, static_banner, yesno
 
 COMMANDS = ("chat", "menu", "setup", "doctor", "health", "import", "migrate", "plans", "ride", "order", "backup",
             "index", "search", "banner", "ship", "release", "gui", "mcp-serve", "skills", "memory", "ledger",
-            "conscience", "about", "version")
+            "conscience", "about", "version", "fix", "lifeline")
 
 EPILOG = f"""commands:
   chat            talk to CHODE (default when piping or with -p)
@@ -29,6 +29,8 @@ EPILOG = f"""commands:
   release vX.Y.Z  bump, changelog, tag, push, GitHub release
   gui             the Deck — same brain, in your browser
   mcp-serve       run CHODE as an MCP server (what the Plan Bridge uses)
+  fix             the connection doctor: finds a model that answers and fixes the config for you
+  lifeline        show what CHODE can fall back to on this machine (keys · local servers · free)
   skills [add|remove] · memory [export|clear] · ledger · conscience · doctor · health
 
 {TAGLINE}."""
@@ -265,6 +267,24 @@ def main(argv=None):
         start_chat(cfg, args, oneshot=about_prompt_only(detect_project()))
     elif cmd == "version":
         print(f"CHODE {VERSION} — {TAGLINE}")
+    elif cmd == "fix":
+        from . import lifeline, state
+        from .ui import TerminalUI
+        ui = TerminalUI()
+        state.set_app(state.App(cfg, ui=ui))
+        print(bold("\n  🩹 CHODE connection doctor\n"))
+        for p, ok_, note in lifeline.status(cfg):
+            print(f"  {'✓' if ok_ else '·'} {p:<12} {dim(note)}")
+        print()
+        out = lifeline.run_fixer(cfg, ui=ui)
+        print("\n  " + (out or "").strip().replace("\n", "\n  ") + "\n")
+    elif cmd == "lifeline":
+        from . import lifeline
+        print(bold("\n  🪢 lifeline — what can answer on this machine\n"))
+        for p, ok_, note in lifeline.status(cfg):
+            print(f"  {'✓' if ok_ else '·'} {p:<12} {dim(note)}")
+        lad = lifeline.ladder(cfg)
+        print("\n  fallback order: " + (" → ".join(f"{p}{('/' + m) if m else ''}" for p, m in lad) if lad else "(fallbacks off)") + "\n")
 
 
 if __name__ == "__main__":

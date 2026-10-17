@@ -36,8 +36,11 @@ def _wizard(cfg):
     print()
     print(bold("  how should CHODE think?"))
     from .plans import detect_plans
+    from . import lifeline
     plans = [p for p in detect_plans() if p[2]]
-    options = [("API key", "pay per token — Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter…"),
+    options = [("Just make it work (free)", "CHODE picks whatever answers right now: a local model if you have one, else a free keyless model"),
+               ("Free key, 2 minutes", "Gemini / Groq / OpenRouter / Mistral / Cerebras free tiers — no card; CHODE opens the page"),
+               ("API key I already have", "pay per token — Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter…"),
                ("Local & free", "Ollama / LM Studio / llama.cpp on this machine — no key, no bill")]
     if plans:
         options.insert(0, ("Subscription I already pay for", "detected: " + ", ".join(p[3].split(' — ')[0] for p in plans)))
@@ -45,7 +48,33 @@ def _wizard(cfg):
         options.append(("Subscription I already pay for", "none detected yet (install claude / codex / gemini CLI)"))
     pick = choose("pick one", options, default=1)
     label = options[pick][0]
-    if label.startswith("Subscription"):
+    if label.startswith("Just make it work"):
+        cands = lifeline.ladder(dict(cfg, provider="__none__", fallbacks="auto"), exclude=("__none__",))
+        if cands:
+            provider, model = cands[0]
+            cfg["provider"], cfg["model"] = provider, model or ""
+            ok(f"using {provider}{(' / ' + model) if model else ''}", PROVIDER_NOTES.get(provider, ""))
+            if provider == "pollinations":
+                print(dim("    it's free and keyless, so it's slower and rate-limited — perfect to start, upgrade any time with `chode setup`"))
+        else:
+            warn("nothing reachable right now", "falling back to the keyless free model; check your internet")
+            cfg["provider"], cfg["model"] = "pollinations", ""
+    elif label.startswith("Free key"):
+        opts = lifeline.free_key_options()
+        idx = choose("which free tier?", opts, default=1)
+        provider = opts[idx][0]
+        cfg["provider"] = provider
+        url = lifeline.open_signup(provider)
+        print(dim(f"    opened {url} in your browser — sign in, create a key, copy it"))
+        key = getpass.getpass(f"  paste the key here (hidden) › ").strip()
+        if key:
+            cfg.setdefault("api_keys", {})[provider] = key
+            ok("key stored in ~/.chode/config.json (chmod 600)")
+        else:
+            warn("no key pasted", f"set {PROVIDERS[provider][2]} later or run chode setup again")
+        cfg["model"] = ""
+        ok(f"model: {FREE_TIERS_MODEL(provider)}", "the free-tier default; /models to see others")
+    elif label.startswith("Subscription"):
         names = [p[0] for p in detect_plans()]
         notes = [(p[0], PROVIDER_NOTES[p[0]] + ("" if p[2] else f"  [not installed: {p[4]}]")) for p in detect_plans()]
         idx = choose("which plan?", notes, default=1)
@@ -54,6 +83,14 @@ def _wizard(cfg):
         ok("no API key needed — CHODE drives the CLI and your plan pays")
         cfg["model"] = input(f"  model alias (optional, e.g. opus/sonnet) [{cfg.get('model') or PROVIDERS[provider][3] or 'default'}] › ").strip() or cfg.get("model", "")
     elif label.startswith("Local"):
+        up, models = lifeline.ollama_running()
+        if lifeline.ollama_installed() and up and not models:
+            if yesno("ollama is running but has no models — pull a small free coding model now (~4 GB)?", True):
+                okp, msg = lifeline.ollama_pull(lifeline.OLLAMA_STARTERS[0], progress=lambda l: print("\r  " + l[:70], end=""))
+                print()
+                (ok if okp else bad)(msg)
+        elif not lifeline.ollama_installed():
+            print(dim("    tip: Ollama is the easiest free local option — https://ollama.com/download, then `ollama pull qwen2.5-coder:7b`"))
         names = ["ollama", "lmstudio", "local"]
         idx = choose("which?", [(n, PROVIDER_NOTES[n]) for n in names], default=1)
         provider = names[idx]
@@ -96,8 +133,16 @@ def _wizard(cfg):
     save_config(cfg)
     ok(f"saved to {CONFIG_FILE}")
     if yesno("test the connection now?", True):
-        ping_test(cfg)
+        if not ping_test(cfg) and yesno("let CHODE try to fix it (connection doctor)?", True):
+            from . import lifeline
+            out = lifeline.run_fixer(cfg)
+            print("  " + (out or "").strip().replace("\n", "\n  "))
     print(dim("  tip: run `chode import` to pull your skills/rules/MCP servers from Claude Code, Cursor, Codex, VS Code…\n"))
+
+
+def FREE_TIERS_MODEL(provider):
+    from .config import FREE_TIERS
+    return FREE_TIERS.get(provider, {}).get("model") or PROVIDERS[provider][3]
 
 
 def _base_url_step(cfg, provider):
@@ -138,19 +183,16 @@ def _model_step(cfg, provider):
 
 def ping_test(cfg):
     client = LLMClient(cfg)
-    old_max = cfg["max_tokens"]
-    cfg["max_tokens"] = 16
-    try:
-        t0 = time.time()
-        with Spinner("ping"):
-            client.chat("Reply with exactly: pong", [{"role": "user", "content": "ping"}], tools=None)
-        ok(f"model responded in {time.time()-t0:.1f}s", f"{client.model} via {client.provider}")
+    t0 = time.time()
+    with Spinner("ping"):
+        okp, err = client.probe()
+    if okp:
+        ok(f"model responded in {time.time()-t0:.1f}s", f"{client.model or '(default)'} via {client.provider}")
         return True
-    except (LLMError, RuntimeError) as e:
-        bad("connection test failed", str(e)[:200])
-        return False
-    finally:
-        cfg["max_tokens"] = old_max
+    bad("connection test failed", f"[{err.kind}] {str(err)[:160]}")
+    if err.hint:
+        print(dim("    → " + err.hint[:300]))
+    return False
 
 
 # ---- one-click import -------------------------------------------------------

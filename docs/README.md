@@ -4,6 +4,7 @@ Start with the [README](../README.md). Then:
 
 - [commands.md](commands.md) — every slash command and CLI subcommand
 - [configuration.md](configuration.md) — every config key, project overlays, env vars
+- [lifeline.md](lifeline.md) — retries, error hints, model auto-correction, the fallback ladder, free rungs, `chode fix`
 - [plan-bridge.md](plan-bridge.md) — riding Claude / Codex / Gemini subscriptions; `chode ride`; CHODE as an MCP server
 - [import.md](import.md) — what `chode import` scans and what it becomes
 - [order.md](order.md) — the audit, the scaffold, backups, ABOUT.md

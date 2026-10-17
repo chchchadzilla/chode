@@ -3,6 +3,34 @@
 All notable changes to CHODE are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](https://semver.org/).
 
+## [1.0.1] - 2026-10-17
+
+### Added
+- **The lifeline.** CHODE no longer dies on a connection error:
+  - requests retry on network errors, 429 and 5xx with exponential backoff (`Retry-After` honored); bad keys
+    and unknown models are not retried;
+  - every failure is classified (`auth` · `not_found` · `rate_limit` · `overloaded` · `network` · `bad_request`)
+    and carries a one-sentence hint plus the provider's docs URL;
+  - rejected model names are auto-corrected against the provider's live model list (`sonnet`/`opus`/`haiku`
+    mean "the newest you have"; retired ids resolve to their newest sibling), then the provider's known-good list;
+  - a **fallback ladder** (`fallbacks: "auto"`): other keys → local servers that are actually running → the
+    keyless free rung; every switch is announced and session-only (`/provider keep` saves it);
+    `last_known_good` is remembered automatically;
+  - a **startup guarantee**: a provider that can't possibly answer (no key, server down) is swapped at boot;
+  - **`chode fix` / `/fix`**: the connection doctor — a small agent on whatever rung answers, with
+    `list_models`, `test_connection`, `set_config` (never API keys) and `web_fetch` for the docs, following the
+    built-in `connection-doctor` skill;
+  - `chode lifeline` / `/lifeline`: what can answer on this machine and in what order;
+  - new providers: `pollinations` (free, keyless, community-run) and `huggingface` (free tier);
+  - setup wizard: **"Just make it work (free)"** and **"Free key, 2 minutes"** (opens the signup page for
+    Gemini / Groq / OpenRouter / Mistral / Cerebras / Hugging Face); failed connection test offers the doctor;
+  - every connection error in a session prints a numbered playbook of free ways out.
+- Mock server gained `fail_with`, `valid_models`, `models`, `retry_after` and an Ollama-style `/api/tags`; 11 new tests.
+
+### Changed
+- A session fallback is never persisted as the default; `save_config` keeps the user's chosen provider.
+- Tests isolate the config file per test.
+
 ## [1.0.0] - 2026-10-12
 
 The thicc release. CHODE grows from a single 2,900-line file into a proper package with

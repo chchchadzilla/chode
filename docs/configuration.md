@@ -43,6 +43,9 @@ Set `CHODE_HOME` to relocate `~/.chode` (tests do this).
 | `gui.port` / `gui.open_browser` | 7331 / true | |
 | `banner.image_provider` | `auto` | `openai` / `gemini` / `xai` / `auto` |
 | `agents.subagent_model` / `agents.max_depth` | `""` / 2 | |
+| `fallbacks` | `"auto"` | lifeline ladder: `"auto"`, a list of `"provider"` / `"provider:model"`, or `false` (see [lifeline.md](lifeline.md)) |
+| `retries` | 3 | per-request retries for network errors / 429 / 5xx (exponential backoff, Retry-After honored) |
+| `last_known_good` | `{}` | written automatically when a provider answers; tried first when the default can't |
 
 ## Environment variables
 
