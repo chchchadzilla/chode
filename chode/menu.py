@@ -12,7 +12,8 @@ MENU_ITEMS = [
     ("⏪", "Resume last session", "pick up where you left off",                           "resume"),
     ("🖥", "Open the Deck (GUI)",  "the same brain, in your browser",                      "gui"),
     ("🧙", "Setup",               "provider · plan · key · model · vibes",                "setup"),
-    ("🥤", "Import (the gulp)",   "pull skills/rules/MCP from Claude Code, Cursor, Codex, VS Code…", "import"),
+    ("🎚", "Tuning",              "temperature · top_p · top_k — per provider or per model", "sampling"),
+    ("🥤", "Import (the gulp)",   "pull skills/rules/MCP from Claude Code, Cursor, Codex, VS Code… (+ other drives)", "import"),
     ("💳", "Plans",               "ride the subscription you already pay for",            "plans"),
     ("📐", "ORDER",               "audit & scaffold this repo",                           "order"),
     ("🩺", "Doctor",              "audit your environment & config",                      "doctor"),
@@ -70,6 +71,10 @@ def _dispatch(action, cfg, args):
     elif action == "import":
         from .wizard import run_import
         run_import(cfg)
+    elif action == "sampling":
+        from . import sampling
+        from .llm import LLMClient
+        sampling.interactive(cfg, LLMClient(cfg))
     elif action == "plans":
         from .wizard import run_plans
         run_plans(cfg)

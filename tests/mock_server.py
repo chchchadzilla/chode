@@ -29,12 +29,13 @@ DEFAULT_SCRIPT = [
 
 class MockLLM:
     def __init__(self, script=None, port=0, stream_ok=True, fail_with=None, valid_models=None, models=None,
-                 retry_after=None):
+                 retry_after=None, reject_params=None):
         self.script = list(script or DEFAULT_SCRIPT)
         self.requests = []
         self.turn = 0
         self.stream_ok = stream_ok
         self.fail_with = list(fail_with or [])
+        self.reject_params = dict(reject_params or {})   # {"temperature": "`temperature` is deprecated for this model."}
         self.valid_models = set(valid_models) if valid_models else None
         self.models = list(models or ["mock-1", "mock-2"])
         self.retry_after = retry_after
@@ -98,6 +99,9 @@ class MockLLM:
                             429: "Rate limit reached", 500: "internal error", 503: "overloaded"}
                     hdrs = {"Retry-After": mock.retry_after} if mock.retry_after and code in (429, 503) else None
                     return self._json(code, {"error": {"message": msgs.get(code, "error"), "type": "mock_error", "code": code}}, hdrs)
+                for param, msg in mock.reject_params.items():
+                    if param in body:
+                        return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": msg}})
                 if mock.valid_models is not None and body.get("model") not in mock.valid_models:
                     return self._json(404, {"error": {"message": f"The model `{body.get('model')}` does not exist or you do not have access to it.",
                                                       "type": "invalid_request_error", "code": "model_not_found"}})

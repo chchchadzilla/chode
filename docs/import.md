@@ -4,10 +4,29 @@ One command. One confirm. Everything you set up in other coding agents comes alo
 removed from them.
 
 ```
-chode import            # interactive: numbered list, pick all / new / 1,3-5
-chode import --yes      # everything you don't already have
-/import                 # same, inside a session
+chode import                      # interactive: numbered list, pick all / new / 1,3-5
+chode import --yes                # everything you don't already have
+chode import --drives             # also search every other mounted drive (asked interactively otherwise; --no-drives to skip)
+chode import D:\old ~/usb/skills  # any folder: a skill, a skills folder, a copied ~/.claude, a project
+/import [folder…] [--drives]      # same, inside a session
 ```
+
+## Other drives
+
+"My skills are on the D: drive / a USB stick / the old laptop's disk." `--drives` (or answering yes when CHODE notices
+other drives) scans each one with a bounded walk: depth ≤ 4, a few seconds per drive, never inside `Windows/`,
+`Program Files/`, `AppData/`, `Library/`, `node_modules/`, `.git/`, media folders… It finds
+
+- **homes** — any folder containing `.claude`, `.codex`, `.gemini`, `.cursor`, `.codeium`, `.continue`, `.antigravity`,
+  `.roo`, `.openclaw`, `.hermes`, `.kilocode`, `.claude.json` or `.aider.conf.yml` (typically `E:\Users\<name>` or a backup
+  of one). Everything in the table below that lives under a home is scanned there too, labelled `Claude Code @ E:`;
+- **stray skill folders** — any folder whose children have `SKILL.md`, labelled `skills folder @ E:`.
+
+Drives come from drive letters on Windows (all but the system/home drive), `/Volumes/*` on macOS, and `/media/*`,
+`/run/media/*/*`, `/mnt/*` on Linux — which is also where WSL mounts the Windows drives (`/mnt/c/Users/<name>` is found).
+
+A named folder is classified the same way (skill · skills folder · home · project) and, for a plain folder, searched
+inside with the same bounded walk.
 
 ## What is scanned
 

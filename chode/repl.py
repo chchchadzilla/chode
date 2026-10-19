@@ -137,8 +137,8 @@ class Repl:
             run_agent(self.client, self.perms, self.system_ref[0], self.history, ui=self.ui)
         except LLMError as e:
             from . import lifeline
-            self.ui.notice(f"\n🪢 the model didn't answer — {e.pretty()}", "error")
-            self.ui.notice("\n" + lifeline.playbook(self.cfg, e) + "\n  (type /fix and CHODE will try to repair this itself)", "warn")
+            self.ui.notice(f"\n🪢 the model didn't answer — [{e.kind}] {str(e)[:300]}", "error")
+            self.ui.notice("\n" + lifeline.what_now(self.cfg, e, in_session=True), "warn")
             if self.history and self.history[-1]["role"] == "user":
                 self.history.pop()
         except KeyboardInterrupt:

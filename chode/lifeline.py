@@ -44,6 +44,28 @@ PROVIDER_DOCS = {
     "pollinations": "https://github.com/pollinations/pollinations/blob/master/APIDOCS.md",
 }
 
+# Where you actually get a key (the docs page is not the keys page).
+PROVIDER_KEYS = {
+    "anthropic": "https://console.anthropic.com/settings/keys",
+    "openai": "https://platform.openai.com/api-keys",
+    "gemini": "https://aistudio.google.com/apikey",
+    "xai": "https://console.x.ai",
+    "openrouter": "https://openrouter.ai/keys",
+    "groq": "https://console.groq.com/keys",
+    "mistral": "https://console.mistral.ai/api-keys",
+    "deepseek": "https://platform.deepseek.com/api_keys",
+    "together": "https://api.together.ai/settings/api-keys",
+    "cerebras": "https://cloud.cerebras.ai",
+    "moonshot": "https://platform.moonshot.ai/console/api-keys",
+    "perplexity": "https://www.perplexity.ai/settings/api",
+    "huggingface": "https://huggingface.co/settings/tokens",
+    "azure": "https://portal.azure.com",
+}
+
+# What a real key starts with — the fastest way to spot "you pasted the wrong thing".
+KEY_PREFIXES = {"anthropic": "sk-ant-", "openai": "sk-", "openrouter": "sk-or-", "groq": "gsk_", "xai": "xai-",
+                "gemini": "AIza", "huggingface": "hf_", "perplexity": "pplx-", "deepseek": "sk-", "together": ""}
+
 # Ladder order when "fallbacks" is "auto". Keyed providers first (best → cheapest), then local, then keyless.
 AUTO_ORDER = ["anthropic", "openai", "gemini", "xai", "groq", "openrouter", "deepseek", "mistral", "cerebras",
               "together", "moonshot", "huggingface", "ollama", "lmstudio", "local", "pollinations"]
@@ -238,6 +260,10 @@ def hint(kind, provider, model="", detail=""):
                     f"LM Studio: enable the local server) or pick another provider.")
         return f"Couldn't reach {provider}. Check your internet/proxy/VPN, or the base URL in /config. Docs: {docs}"
     if kind == "bad_request":
+        param = _rejected_param(detail)
+        if param:
+            return (f"{provider} doesn't take `{param}` for {model or 'this model'} — CHODE drops it automatically, retries, and "
+                    f"remembers that for this model (`/sampling` to see or change what gets sent). Just try again.")
         return f"{provider} rejected the request shape ({detail[:120]}). Often a model that doesn't support tool calling — try another model. Docs: {docs}"
     return f"Unexpected error from {provider}: {detail[:160]}. Docs: {docs}"
 
@@ -291,6 +317,47 @@ def correct_model(wanted, available, provider=""):
         if fb in available:
             return fb
     return None
+
+
+def verify_model(cfg, name, client=None, available=None):
+    """What a human typed → what the provider actually calls it, checked against the LIVE model list.
+
+    'anthropic/opus-5.5' → 'claude-opus-5-5' (normalized), then looked up; 'sonnet' → the newest sonnet you
+    have; a typo → the closest real id. Returns (model_id, note, verified). Never raises, never edits cfg:
+    the caller decides what to do with the answer. `available` skips the network call when you already
+    have the list."""
+    from .config import normalize_model
+    provider = cfg.get("provider", "anthropic")
+    typed = (name or "").strip()
+    wanted = normalize_model(provider, typed)
+    if not wanted:
+        return "", None, False
+    style = PROVIDERS.get(provider, ("openai",))[0]
+    if style == "plan":
+        return wanted, None, False
+    if available is None:
+        if not usable(cfg, provider):
+            why = "no API key yet" if PROVIDERS[provider][2] else "server not running"
+            return wanted, f"couldn't check '{wanted}' against {provider}'s model list ({why}) — CHODE will auto-correct it on first use", False
+        from .llm import LLMClient, LLMError
+        try:
+            available = [m for m in (client or LLMClient(cfg)).list_models(provider) if m]
+        except LLMError as e:
+            return wanted, f"couldn't check '{wanted}' against {provider}'s model list ({e.kind}) — CHODE will auto-correct it on first use", False
+    if not available:
+        return wanted, None, False
+    low = {m.lower(): m for m in available}
+    if wanted.lower() in low:
+        exact = low[wanted.lower()]
+        return exact, (None if exact == typed else f"'{typed}' → '{exact}'"), True
+    alias_target = MODEL_ALIASES.get(provider, {}).get(wanted.lower())
+    if alias_target and alias_target.lower() in low:
+        return low[alias_target.lower()], f"'{typed}' → '{low[alias_target.lower()]}'", True
+    fixed = correct_model(wanted, available, provider)
+    if fixed:
+        return fixed, f"'{typed}' isn't a model {provider} knows → using '{fixed}' (closest match on the live list; /models to see all)", True
+    return wanted, (f"'{wanted}' isn't on {provider}'s model list ({len(available)} models) — /models shows them; "
+                    f"CHODE will try to auto-correct on first use"), False
 
 
 # --------------------------------------------------------------------------
@@ -422,25 +489,188 @@ def run_fixer(cfg, error=None, ui=None):
     return ("No model anywhere could answer, so the fixer can't run. Here's the manual path:\n" + playbook(cfg, last_err or error))
 
 
-def playbook(cfg, error=None):
-    p = cfg.get("provider", "anthropic")
-    lines = []
-    if error is not None and getattr(error, "hint", ""):
-        lines.append(f"What happened: {error.hint}")
-    lines.append("Fastest fixes, pick one:")
-    lines.append("  1. Free, no key, no signup:  /provider pollinations        (slow-ish, rate-limited, fine for fixing things)")
+_SAMPLING_PARAMS = ("temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens", "stream_options")
+
+
+def _rejected_param(error):
+    text = str(error or "").lower()
+    if not text:
+        return None
+    for p in _SAMPLING_PARAMS:
+        if re.search(r"(?<![a-z_])" + re.escape(p) + r"(?![a-z_])", text):
+            return p
+    return None
+
+
+def _free_paths(cfg, in_session=True):
+    """The three free ways out, as concrete commands for THIS machine."""
+    sw = "/provider" if in_session else "chode chat --provider"
+    out = [f"free, no key, no signup:   {sw} pollinations          (slower, rate-limited — perfect for getting unstuck)"]
     if ollama_installed():
         up, models = ollama_running()
         if up and models:
-            lines.append(f"  2. Free, local, private:     /provider ollama {pick_ollama_model(models)}")
+            out.append(f"free, local, private:      {sw} ollama {pick_ollama_model(models)}")
+        elif up:
+            out.append(f"free, local, private:      ollama pull qwen2.5-coder:7b     then  {sw} ollama")
         else:
-            lines.append("  2. Free, local, private:     ollama serve   &&   ollama pull qwen2.5-coder:7b   then /provider ollama")
+            out.append(f"free, local, private:      ollama serve   then   ollama pull qwen2.5-coder:7b   then  {sw} ollama")
     else:
-        lines.append("  2. Free, local, private:     install https://ollama.com/download, then `ollama pull qwen2.5-coder:7b`, then /provider ollama")
-    for prov in ("gemini", "groq", "openrouter"):
-        ft = FREE_TIERS[prov]
-        lines.append(f"  3. Free key (2 min):         {ft['signup']}  → export {PROVIDERS[prov][2]}=…  → /provider {prov} {ft['model']}")
-        break
-    lines.append(f"  4. Fix the current one:      docs for {p}: {PROVIDER_DOCS.get(p, '')}  → /models → /model <name>")
-    lines.append("Or just run `chode fix` and let CHODE do this for you.")
-    return "\n".join(lines)
+        out.append(f"free, local, private:      install https://ollama.com/download → ollama pull qwen2.5-coder:7b → {sw} ollama")
+    ft = FREE_TIERS["gemini"]
+    out.append(f"free key, 2 minutes:       {ft['signup']} → `chode setup` → \"Free key, 2 minutes\"  (or export {PROVIDERS['gemini'][2]}=…)")
+    return out
+
+
+def what_now(cfg, error=None, in_session=True):
+    """The whole 'what do I do now' answer for ANY connection failure, keyed by what actually went wrong.
+
+    Sections: what happened (plain English) · what CHODE already did · do this now (specific to the error) ·
+    free ways out that work on this machine · let CHODE do it (`chode fix`) · the docs link."""
+    kind = getattr(error, "kind", "unknown") if error is not None else "unknown"
+    provider = getattr(error, "provider", "") or cfg.get("provider", "anthropic")
+    model = getattr(error, "model", "") or cfg.get("model") or PROVIDERS.get(provider, ("", "", "", ""))[3] or "(provider default)"
+    key_env = PROVIDERS.get(provider, ("", "", "", ""))[2]
+    docs = PROVIDER_DOCS.get(provider, "")
+    keys_url = PROVIDER_KEYS.get(provider, docs)
+    raw = str(error)[:220].replace("\n", " ") if error is not None else ""
+    fix_cmd = "/fix" if in_session else "chode fix"
+    model_cmd = "/model" if in_session else "chode chat --model"
+    samp_cmd = "/sampling" if in_session else "chode sampling"
+    L = []
+
+    def section(title):
+        L.append(f"{title}")
+
+    # ---- what happened --------------------------------------------------------------
+    section("WHAT HAPPENED")
+    if kind == "auth":
+        if provider in KEYLESS:
+            L.append(f"  {provider} refused the request. It's keyless, so this usually means the service is down or changed its API.")
+        else:
+            L.append(f"  {provider} rejected your API key (or there isn't one). The request never got to a model.")
+    elif kind == "not_found":
+        L.append(f"  {provider} has no model called '{model}'. Names change often and every vendor spells them differently "
+                 f"(the real Anthropic ids look like claude-opus-5-5, not anthropic/opus-5.5).")
+    elif kind == "bad_request":
+        param = _rejected_param(error)
+        if param:
+            L.append(f"  {provider} rejected the `{param}` setting for {model}: {raw}")
+        else:
+            L.append(f"  {provider} rejected the shape of the request: {raw}")
+    elif kind == "rate_limit":
+        L.append(f"  {provider} says you're out of quota or sending too fast. Your setup is fine; the account is empty or throttled.")
+    elif kind == "overloaded":
+        L.append(f"  {provider}'s servers are overloaded or erroring. This is on their side, not yours.")
+    elif kind == "network":
+        if provider in ("ollama", "lmstudio", "local"):
+            L.append(f"  Nothing is listening where {provider} should be ({(cfg.get('base_urls') or {}).get(provider) or PROVIDERS[provider][1]}).")
+        else:
+            L.append(f"  CHODE couldn't reach {provider} at all — internet, VPN/proxy, firewall, or a wrong base URL.")
+    else:
+        L.append(f"  Something unexpected came back from {provider}: {raw or 'no detail'}")
+    if error is not None and getattr(error, "hint", "") and kind in ("unknown",):
+        L.append(f"  {error.hint}")
+
+    # ---- what CHODE already did ----------------------------------------------------
+    did = []
+    if kind in ("network", "overloaded", "rate_limit"):
+        did.append(f"retried {cfg.get('retries', 3)}× with backoff")
+    if kind == "not_found":
+        did.append("tried to match the name against the live model list")
+    if kind == "bad_request" and _rejected_param(error):
+        did.append("drops rejected settings automatically and remembers it per model (so the next try just works)")
+    fb = cfg.get("fallbacks", "auto")
+    if fb is False or fb == "off":
+        did.append("did NOT fall back (fallbacks are off: /config fallbacks auto to turn them on)")
+    elif cfg.get("_fallback_from"):
+        did.append(f"fell back from {cfg['_fallback_from']} to {cfg.get('provider')} for this session")
+    if did:
+        section("WHAT CHODE ALREADY DID")
+        for d in did:
+            L.append(f"  • {d}")
+
+    # ---- do this now --------------------------------------------------------------
+    section("DO THIS NOW")
+    if kind == "auth" and provider not in KEYLESS:
+        pfx = KEY_PREFIXES.get(provider, "")
+        L.append(f"  1. Get (or re-copy) a key: {keys_url}" + (f"   — real {provider} keys start with `{pfx}`" if pfx else ""))
+        L.append(f"  2. Give it to CHODE: `chode setup` → \"API key I already have\" → paste it (stored chmod 600),")
+        L.append(f"     or set it in your shell: export {key_env}=…   (Windows PowerShell: $env:{key_env}=\"…\"; permanent: setx {key_env} …)")
+        L.append(f"  3. Check the account has credit / an active plan — a valid key with $0 balance also fails.")
+        if provider == "anthropic":
+            L.append("  4. On a Claude Pro/Max subscription instead of an API key? That's a different thing: /provider claude-plan (needs the `claude` CLI logged in).")
+    elif kind == "auth":
+        L.append(f"  1. Check the service status / docs: {docs}")
+        L.append("  2. Pick another free rung below while it's down.")
+    elif kind == "not_found":
+        suggestion = None
+        if usable(cfg, provider):
+            try:
+                from .llm import LLMClient
+                avail = [m for m in LLMClient(dict(cfg, provider=provider)).list_models(provider) if m]
+                suggestion = correct_model(model, avail, provider)
+            except Exception:
+                suggestion = None
+        if suggestion:
+            L.append(f"  1. Did you mean `{suggestion}`?  →  {model_cmd} {suggestion}")
+        else:
+            known = MODEL_FALLBACKS.get(provider, [])[:3]
+            if known:
+                L.append(f"  1. Names {provider} definitely knows: {', '.join(known)}  →  {model_cmd} <one of them>")
+        L.append(f"  2. See the real list: {'/models' if in_session else 'chode sampling (shows the current one) · /models inside a session'}   (or let `{fix_cmd}` pick one for you)")
+        L.append(f"  3. Vendor's own page of names: {docs}")
+        if provider in ("ollama", "lmstudio", "local"):
+            L.append("  4. Local server: the model must be pulled/loaded first (ollama pull <name>; LM Studio: load it in the app).")
+    elif kind == "bad_request":
+        param = _rejected_param(error)
+        if param:
+            L.append(f"  1. Just try again — CHODE already dropped `{param}` for {model} and remembered that.")
+            L.append(f"  2. Set it yourself: {samp_cmd} {param} default   (per model / per provider — `{samp_cmd}` shows what's sent)")
+            L.append("  3. Some models DO take it (OpenRouter, Ollama, OpenAI's older models) — CHODE keeps per-model notes, so nothing else changes.")
+        else:
+            L.append(f"  1. Most common cause: a model that can't do tool calling → pick another: /models, then {model_cmd} <name>")
+            L.append(f"  2. Second most common: the base URL points at the wrong API → /config base_urls.{provider} <url> (default: {PROVIDERS[provider][1] or 'n/a'})")
+            L.append(f"  3. Read the message above literally — it usually names the field. Docs: {docs}")
+    elif kind == "rate_limit":
+        L.append(f"  1. Wait a minute and retry (free tiers reset by the minute/day).")
+        L.append(f"  2. Add credit / check limits: {keys_url}")
+        L.append(f"  3. Or switch for now — pick a free rung below; `{fix_cmd}` does it for you.")
+    elif kind == "overloaded":
+        L.append("  1. Wait 30–60 seconds and retry — this almost always clears on its own.")
+        L.append(f"  2. Vendor status page / docs: {docs}")
+        L.append("  3. Meanwhile use another rung below (your work isn't lost).")
+    elif kind == "network":
+        if provider == "ollama":
+            L.append("  1. Start it:  ollama serve        (or open the Ollama app)")
+            L.append("  2. Get a model: ollama pull qwen2.5-coder:7b   (~4 GB, free, good at tools)")
+            L.append("  3. Not installed? https://ollama.com/download")
+        elif provider == "lmstudio":
+            L.append("  1. Open LM Studio → Developer tab → Start Server (port 1234), load a model.")
+        elif provider == "local":
+            L.append(f"  1. Start your server (llama.cpp / vLLM / LiteLLM / Jan…) and make sure the URL matches: /config base_urls.local <url>")
+        else:
+            L.append("  1. Open any website — is the internet up? On a VPN / corporate network, set HTTPS_PROXY if you need one.")
+            L.append(f"  2. Base URL right? default is {PROVIDERS[provider][1]}  → /config base_urls.{provider} <url> (or delete the override)")
+            L.append("  3. Pick a local or free rung below while it's unreachable.")
+    else:
+        L.append(f"  1. Read the error text above — it usually says what's wrong. Docs: {docs}")
+        L.append(f"  2. `{fix_cmd}` runs the connection doctor; `chode doctor` audits everything else.")
+
+    # ---- free ways out ----------------------------------------------------------------
+    section("ANY OF THESE GETS YOU CODING IN UNDER 2 MINUTES")
+    for i, line in enumerate(_free_paths(cfg, in_session), 1):
+        L.append(f"  {i}. {line}")
+
+    # ---- the easy button ------------------------------------------------------------------
+    section("OR LET CHODE DO IT")
+    both = "`/fix` in a session · `chode fix` from your terminal" if in_session else "`chode fix` from your terminal · `/fix` in a session"
+    L.append(f"  {both} — the connection doctor runs on whatever model answers, reads the error, lists models,")
+    L.append("  reads the vendor's docs, switches provider/model, tests, and tells you what it changed. It can't see or change API keys.")
+    if error is not None and getattr(error, "hint", "") and kind != "unknown":
+        L.append(f"  (short version: {error.hint[:200]})")
+    return "\n".join(L)
+
+
+def playbook(cfg, error=None):
+    """Back-compat name: the full 'what now' block."""
+    return what_now(cfg, error)

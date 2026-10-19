@@ -115,7 +115,11 @@ DEFAULT_CONFIG = {
     "provider": "anthropic",
     "model": "",
     "max_tokens": 8192,
-    "temperature": 0.2,
+    "temperature": 0.2,             # legacy alias for sampling.temperature
+    # Sampling is sent by default; a model that rejects a param gets it dropped and remembered (param_quirks).
+    # Per-provider / per-model overrides: "overrides": {"openrouter": {"temperature": 0.7}, "ollama/qwen3:8b": {"top_k": 40}}
+    # null = let the provider decide. Edit interactively with /sampling.
+    "sampling": {"temperature": 0.2, "top_p": None, "top_k": None, "overrides": {}},
     "stream": True,
     "base_urls": {},
     "api_keys": {},
@@ -161,9 +165,11 @@ DEFAULT_CONFIG = {
                                     # "provider" or "provider:model" strings to control the order; false = off
     "retries": 3,                   # network / 429 / 5xx retries per request (exponential backoff)
     "last_known_good": {},          # {"provider": ..., "model": ...} — remembered automatically
+    "param_quirks": {},             # {model: ["temperature", ...]} — request params a model rejected; learned automatically
 }
 
-_NESTED = ("memory", "conscience", "order", "rag", "publish", "plans", "gui", "banner", "agents", "last_known_good")
+_NESTED = ("memory", "conscience", "order", "rag", "publish", "plans", "gui", "banner", "agents", "last_known_good",
+           "param_quirks", "sampling")
 
 
 def _deep_merge(base, override):
@@ -215,7 +221,49 @@ def load_config(cwd=None):
     if cfg.get("provider") not in PROVIDERS:
         print(yellow(f"warning: unknown provider '{cfg.get('provider')}' — falling back to anthropic"))
         cfg["provider"] = "anthropic"
+    # legacy top-level temperature (pre-1.0.2 configs) feeds sampling.temperature
+    if user and "temperature" in user and "sampling" not in user:
+        cfg["sampling"]["temperature"] = user["temperature"]
+    # normalize a human-typed model name ("anthropic/opus-5.5" → "claude-opus-5-5")
+    if cfg.get("model"):
+        cfg["model"] = normalize_model(cfg["provider"], cfg["model"])
     return cfg
+
+
+def normalize_model(provider, name):
+    """Turn what a human typed into what the provider's API expects. Pure, no network:
+    'anthropic/opus-5.5' → 'claude-opus-5-5' · 'Opus 5.5' → 'claude-opus-5-5' · 'gpt 5 mini' → 'gpt-5-mini'
+    OpenRouter keeps 'vendor/model' ids (that IS its format)."""
+    import re
+    n = (name or "").strip()
+    if not n:
+        return n
+    style = PROVIDERS.get(provider, ("openai",))[0]
+    if style == "plan":
+        return n.lower().replace(" ", "")
+    low = n.lower().strip()
+    if provider != "openrouter" and "/" in low:
+        vendor, _, rest = low.partition("/")
+        if vendor in ("anthropic", "openai", "google", "x-ai", "xai", "meta-llama", "mistralai", "deepseek", "qwen", "groq"):
+            low = rest
+    low = re.sub(r"\s+", "-", low)
+    if provider == "anthropic":
+        low = low.replace(".", "-").replace("_", "-")
+        low = re.sub(r"^(claude-)?(opus|sonnet|haiku|fable|mythos)[- ]?(\d)", r"claude-\2-\3", low)
+        low = re.sub(r"^claude-(\d)", r"claude-\1", low)
+        # "claude-3.5-sonnet" style → keep as typed (3-5-sonnet is the real id shape for 3.x)
+        return low
+    if provider == "openai":
+        low = re.sub(r"^gpt-?(\d)", r"gpt-\1", low).replace(" ", "-")
+        return low
+    if provider == "gemini":
+        low = re.sub(r"^(google-|models/)", "", low)
+        low = re.sub(r"^gemini-?(\d)", r"gemini-\1", low)
+        return low
+    if provider == "xai":
+        low = re.sub(r"^grok-?(\d)", r"grok-\1", low)
+        return low
+    return n if provider == "openrouter" else low
 
 
 def save_config(cfg):
@@ -332,6 +380,7 @@ def price_for(model):
 def resolve_model(cfg):
     provider = cfg.get("provider", "anthropic")
     model = cfg.get("model") or PROVIDERS[provider][3]
+    model = normalize_model(provider, model) if cfg.get("model") else model
     return MODEL_ALIASES.get(provider, {}).get(model, model)
 
 

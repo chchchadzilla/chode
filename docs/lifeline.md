@@ -31,12 +31,53 @@ With `fallbacks: "auto"` (the default), in order:
 
 Pin an order: `/config fallbacks '["groq","ollama:qwen2.5-coder:7b","pollinations"]'`. Turn it off: `/config fallbacks false`.
 
-## Model-name auto-correction
+## Model names: what you type vs what the API wants
 
-Typos, retired ids and aliases get fixed against the live list: `claude-sonnet-5-5` on an account that only has
-`claude-sonnet-4-5-20250929` resolves to it (newest version wins, then newest date); `sonnet` / `opus` / `haiku`
-always mean "the newest one you have"; close matches use fuzzy matching; otherwise the provider's known-good list
-(`MODEL_FALLBACKS`) is tried.
+Two layers, both automatic:
+
+1. **Normalization** (pure, no network, `config.normalize_model`): `anthropic/opus-5.5` → `claude-opus-5-5`,
+   `Opus 5.5` → `claude-opus-5-5`, `gpt5 mini` → `gpt-5-mini`, `models/gemini-2.5-flash` → `gemini-2.5-flash`,
+   `Grok 4` → `grok-4`. OpenRouter ids are left alone because `vendor/model` *is* its format. Applied when the config
+   is loaded (so an old saved mistake is fixed), on `/model`, `/provider p m`, `/config model`, `chode --model`, in the
+   wizard and in the fixer's `set_config model`.
+2. **Live verification** (`lifeline.verify_model`): the name is looked up in the provider's `/models` list the moment
+   you set it. Exact (case-insensitive) match → confirmed. Alias (`sonnet`) → the newest matching id. Typo → the closest
+   real id, announced (`'mock-l' isn't a model local knows → using 'mock-1'`). Nothing close → kept, with a note that
+   `/models` shows the list and CHODE will try again on first use. Can't reach the provider → kept, with the reason.
+   It never guesses wildly: a totally unrelated name is not replaced.
+
+At request time the same correction runs again on a `not_found` error (`correct_model` against the live list, newest
+version wins, then newest date; then the provider's known-good `MODEL_FALLBACKS`).
+
+## Request settings a model won't take
+
+Providers retire parameters: Anthropic's 4.7+/5.x models reject `temperature`/`top_p`/`top_k` with a 400
+("`temperature` is deprecated for this model"); OpenAI's reasoning models reject them and want `max_completion_tokens`.
+Other models (OpenRouter, Ollama, Groq, Gemini, Claude ≤ 4.6) take them fine. CHODE:
+
+- knows the known cases up front (`LLMClient.sampling_gate`) and doesn't send what will be rejected;
+- learns the rest live: a 400 that names a payload field → drop it (or rename `max_tokens`), retry, and **remember it
+  for that model** in `param_quirks` so it's never sent again;
+- lets you get granular: `/sampling` shows exactly what's sent to the current model and why, and sets
+  temperature / top_p / top_k globally, per provider, or per model. A per-model override is a deliberate "send it
+  anyway" and clears a remembered rejection for that setting. See [sampling.md](sampling.md).
+
+## The failure block
+
+Every connection failure — in the wizard's connection test, `chode health`, and in a session — prints the same
+`lifeline.what_now` block, keyed by the error kind:
+
+```
+WHAT HAPPENED                 one plain-English sentence about THIS error
+WHAT CHODE ALREADY DID        retries · model-list matching · dropped settings · fallbacks
+DO THIS NOW                   numbered, specific: the keys page + env var + key prefix for auth; the corrected name for
+                              not_found; the setting to flip for a rejected parameter; `ollama serve` for a dead local server…
+ANY OF THESE GETS YOU CODING  pollinations (no key) · Ollama (local, with the exact command for this machine) · a free key
+IN UNDER 2 MINUTES
+OR LET CHODE DO IT            /fix · chode fix
+```
+
+The old one-line "tip: run chode import" after a failed test is gone; the import tip only shows when the test passed.
 
 ## Startup guarantee
 
@@ -51,7 +92,7 @@ A tiny agent that runs on whatever rung answers, with four tools and one job:
 |---|---|
 | `list_models [provider]` | the provider's live model ids |
 | `test_connection [provider] [model]` | one-token probe → OK, or the error kind + hint |
-| `set_config key value` | provider · model · base_urls.* · fallbacks · stream · max_tokens · temperature — **never API keys** |
+| `set_config key value` | provider · model (normalized + verified) · base_urls.* · fallbacks · stream · max_tokens · sampling.* — **never API keys** |
 | `web_fetch` | read the provider's docs page when the model list isn't enough |
 
 It follows the built-in `connection-doctor` skill: test → read the error kind → list models / read docs /
@@ -79,3 +120,5 @@ opens the signup page for you and only asks you to paste the key.
 | `fallbacks` | `"auto"` | `"auto"` · a list of `"provider"` / `"provider:model"` · `false` |
 | `retries` | `3` | per-request retries for network / 429 / 5xx |
 | `last_known_good` | `{}` | written automatically; `/provider keep` promotes the current one to default |
+| `param_quirks` | `{}` | `{"<model>": ["temperature", …]}` — settings a model rejected; written automatically, cleared with `/sampling forget` |
+| `sampling` | see [sampling.md](sampling.md) | temperature / top_p / top_k defaults + per-provider / per-model overrides |

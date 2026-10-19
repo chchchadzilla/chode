@@ -16,9 +16,10 @@
 | command | |
 |---|---|
 | `/mode [plan\|ask\|edits\|yolo]` | show/set permission mode |
-| `/model [name]` | show/set model (`opus`/`sonnet`/`haiku`/`fable` aliases for Anthropic) |
+| `/model [name]` | show/set model. The name is normalized (`anthropic/opus-5.5` → `claude-opus-5-5`) and checked against the provider's live list; typos resolve to the closest real id, out loud. Aliases `opus`/`sonnet`/`haiku`/`fable` |
 | `/models` | list the provider's models |
-| `/provider [name] [model]` | switch provider (and optionally model) |
+| `/provider [name] [model]` | switch provider (and optionally model — verified the same way) |
+| `/sampling [edit]` | what's sent to this model (temperature · top_p · top_k) and why; `edit` opens the submenu. `/sampling <param> <value\|default> [global\|provider\|model\|<key>]`, `/sampling reset [scope]`, `/sampling forget [model]` — see [sampling.md](sampling.md) |
 | `/plans` | detect installed plan CLIs; offer to switch |
 | `/ride claude\|codex\|gemini [args]` | open the vendor TUI with CHODE mounted via MCP |
 
@@ -67,7 +68,7 @@
 | `/hooks` | list hooks |
 | `/permissions` | mode, session always-list, allow/deny lists |
 | `/commands` | list custom commands |
-| `/import` | the gulp |
+| `/import [folder…] [--drives]` | the gulp; `--drives` also searches other mounted drives, folders can be a skill, a skills folder, a copied `~/.claude` or a project |
 
 ### Session
 | command | |
@@ -105,7 +106,8 @@ chode [command] [args] [-p PROMPT] [-c] [--provider P] [--model M] [--mode MODE]
 | `chat` / `-p "…"` / `chode "…"` | chat / one-shot (stdin is appended when piped) |
 | `-c` | continue the last session in this directory |
 | `menu` · `setup` · `doctor` · `health` | |
-| `import [--yes]` (alias `migrate`) | the gulp; `--yes` imports everything new |
+| `import [folder…] [--drives\|--no-drives] [--yes]` (alias `migrate`) | the gulp; `--drives` scans other drives (asked interactively otherwise), `--yes` imports everything new |
+| `sampling [edit \| <param> <value> [scope] \| reset \| forget]` (alias `tune`) | temperature · top_p · top_k, per provider / per model |
 | `plans` · `ride <cli> [args]` | Plan Bridge |
 | `order [fix\|--json]` · `backup [list\|restore N\|note]` | ORDER |
 | `index [--full]` · `search <q>` | RAG |

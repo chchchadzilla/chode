@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chode"
-version = "1.0.1"
+version = "1.0.2"
 description = "CHODE — code thicc like a tuna can. A local-first, provider-agnostic agentic coding harness that keeps your repos in ORDER."
 readme = "README.md"
 requires-python = ">=3.9"

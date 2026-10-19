@@ -7,6 +7,6 @@ other coding agent, and rides on whatever AI subscription you already pay for.
 Only hard dependency: `requests`. Everything else is the Python standard library.
 """
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 __version__ = VERSION
 TAGLINE = "code thicc like a tuna can"

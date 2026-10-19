@@ -246,7 +246,12 @@ or they "can't figure out which model to pick". The goal is a WORKING provider+m
      You may run `ollama list` / `ollama pull <small model>` via bash if ollama is installed. For cloud providers:
      proxy/VPN/base URL; verify with `list_models`.
    - **rate_limit** → explain the quota in one line and fall back to another provider for now.
-   - **bad_request** → usually a model without tool-calling support: pick a different model.
+   - **bad_request** → read the message. If it names a request setting (`temperature`, `top_p`, `top_k`, `max_tokens`),
+     CHODE already drops it for that model and remembers that — just `test_connection` again; you can also
+     `set_config sampling.temperature default`. Otherwise it's usually a model without tool-calling support, or a wrong
+     base URL: pick a different model / fix `base_urls.<provider>`.
+   - A model name like `anthropic/opus-5.5` or `Opus 5.5` is a human spelling: `set_config model <name>` normalizes it
+     (→ `claude-opus-5-5`) and checks it against the live list; read what it returns.
 3. Prefer free when switching: a running Ollama model → `pollinations` (keyless) → a free-tier key the user already has.
 4. After every change run `test_connection`. Stop at the first OK.
 5. Finish with three short lines: what works now, what was wrong, how to upgrade later (`chode setup`).
@@ -265,20 +270,37 @@ or they "can't figure out which model to pick". The goal is a WORKING provider+m
 - pollinations: https://github.com/pollinations/pollinations/blob/master/APIDOCS.md
 
 ## Rules
-- Never read, print or ask for API keys. Never change anything except provider / model / base_urls / fallbacks.
+- Never read, print or ask for API keys. Never change anything except provider / model / base_urls / fallbacks / sampling.*.
 - Never run shell commands other than `ollama list`, `ollama ps`, `ollama pull <model>`.
 - Fewer words, more `test_connection`.
 """
 
 
 def ensure_builtin_skills():
+    """Install the built-in skills; refresh one when CHODE's bundled text changed and the user hasn't edited it
+    (a `.builtin` sidecar holds the hash of what CHODE last wrote)."""
+    import hashlib
     for name, text in (("skill-porter", SKILL_PORTER_MD), ("repo-order", REPO_ORDER_MD),
                        ("connection-doctor", CONNECTION_DOCTOR_MD)):
         try:
             dest = GLOBAL_SKILLS_DIR / name
-            if not dest.exists():
-                dest.mkdir(parents=True, exist_ok=True)
-                (dest / "SKILL.md").write_text(text.replace("{SKILLS_DIR}", str(GLOBAL_SKILLS_DIR)),
-                                               encoding="utf-8")
+            body = text.replace("{SKILLS_DIR}", str(GLOBAL_SKILLS_DIR))
+            digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            skill_file, sidecar = dest / "SKILL.md", dest / ".builtin"
+            if skill_file.exists():
+                current = skill_file.read_text(encoding="utf-8", errors="replace")
+                if current == body:
+                    if not sidecar.exists():
+                        sidecar.write_text(digest, encoding="utf-8")
+                    continue
+                last_written = sidecar.read_text(encoding="utf-8").strip() if sidecar.exists() else None
+                user_edited = last_written is not None and hashlib.sha256(current.encode("utf-8")).hexdigest() != last_written
+                # pre-1.0.2 installs have no sidecar: treat our own unedited 1.0.1 doctor text as refreshable
+                legacy_ours = last_written is None and name == "connection-doctor" and "# Connection doctor" in current and "sampling" not in current
+                if user_edited or (last_written is None and not legacy_ours):
+                    continue
+            dest.mkdir(parents=True, exist_ok=True)
+            skill_file.write_text(body, encoding="utf-8")
+            sidecar.write_text(digest, encoding="utf-8")
         except Exception:
             pass

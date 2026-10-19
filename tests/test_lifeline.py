@@ -158,3 +158,27 @@ def test_playbook_mentions_free_paths(project):
     tmp, cfg, app = project
     text = lifeline.playbook(cfg, LLMError("x", kind="auth", provider="local", hint="bad key"))
     assert "pollinations" in text and "ollama" in text and "chode fix" in text and "bad key" in text
+
+
+def test_what_now_is_specific_to_the_error(project):
+    """The failure block answers 'what do I do now' for every error kind — and never says 'tip: run chode import'."""
+    tmp, cfg, app = project
+    cfg["provider"] = "anthropic"
+    auth = lifeline.what_now(cfg, LLMError("HTTP 401", kind="auth", provider="anthropic", model="claude-opus-5-5"), in_session=False)
+    assert "console.anthropic.com/settings/keys" in auth and "ANTHROPIC_API_KEY" in auth and "sk-ant-" in auth
+    assert "claude-plan" in auth and "WHAT HAPPENED" in auth and "DO THIS NOW" in auth and "chode import" not in auth
+    temp = lifeline.what_now(cfg, LLMError('HTTP 400 from anthropic: "`temperature` is deprecated for this model."', kind="bad_request",
+                                           status=400, provider="anthropic", model="claude-opus-5-5"))
+    assert "rejected the `temperature` setting" in temp and "/sampling temperature default" in temp and "Just try again" in temp
+    assert "OpenRouter" in temp                     # some models DO take it — say so
+    nf = lifeline.what_now(cfg, LLMError("HTTP 404", kind="not_found", provider="anthropic", model="anthropic/opus-5.5"), in_session=True)
+    assert "/models" in nf and "claude-opus-5-5" in nf and "/fix" in nf
+    cfg["provider"] = "ollama"
+    net = lifeline.what_now(cfg, LLMError("conn refused", kind="network", provider="ollama"))
+    assert "ollama serve" in net and "ollama pull" in net
+    rl = lifeline.what_now(cfg, LLMError("429", kind="rate_limit", provider="groq"))
+    assert "console.groq.com/keys" in rl and "Wait a minute" in rl
+    bad = lifeline.what_now(cfg, LLMError("HTTP 400: bad schema", kind="bad_request", status=400, provider="local"))
+    assert "tool calling" in bad and "base_urls.local" in bad
+    for text in (auth, temp, nf, net, rl, bad):
+        assert "pollinations" in text and "UNDER 2 MINUTES" in text and "connection doctor" in text

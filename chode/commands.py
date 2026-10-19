@@ -31,13 +31,13 @@ def discover_commands(cwd=None):
 HELP = """
 {title}
   {h}Talk{r}        just type. @file attaches a file · !cmd runs a shell command · #note saves a note to {mem}
-  {h}Modes{r}       /mode plan|ask|edits|yolo     /model [name]   /models   /provider [name] [model]
+  {h}Modes{r}       /mode plan|ask|edits|yolo     /model [name]   /models   /provider [name] [model]   /sampling [edit]
   {h}Memory{r}      /remember <text> [--global]   /memories   /forget <id>   /memory   /init   /conscience   /ledger
   {h}ORDER{r}       /order   /about   /tidy   /backup [list|restore N]   /status   /diff   /git
   {h}Ship{r}        /ship [message] [--no-push]   /release vX.Y.Z   /banner [name]
   {h}Brain{r}       /index   /search <query>   /skills [add <dir|url>]   /agents   /mcp [reload]   /hooks   /plans
   {h}Session{r}     /undo   /resume   /compact   /clear   /export [file]   /cost   /config [key value]   /permissions
-  {h}Apps{r}        /gui   /ride claude|codex|gemini   /import   /doctor   /theme [color]   /intro   /help   /exit
+  {h}Apps{r}        /gui   /ride claude|codex|gemini   /import [path…] [--drives]   /doctor   /theme [color]   /intro   /help   /exit
   {h}Lifeline{r}    /fix (repair the model connection)   /lifeline (what CHODE falls back to)   /provider keep
 """
 
@@ -81,8 +81,15 @@ def handle_slash(cmd, ctx):
 
     elif name == "model":
         if rest:
-            cfg["model"] = rest[0]
+            from . import lifeline
+            with Spinner("checking the name against the live model list"):
+                new, note, verified = lifeline.verify_model(cfg, rest_raw.strip(), client)
+            cfg["model"] = new
             save_config(cfg)
+            if note:
+                print(yellow(f"  ↳ {note}"))
+            elif verified:
+                print(green(f"  ✓ {new} is on {client.provider}'s model list"))
         print(f"model: {bold(client.model)}  (provider: {client.provider})")
 
     elif name == "models":
@@ -109,14 +116,27 @@ def handle_slash(cmd, ctx):
                 print(red(f"unknown provider. options: {', '.join(PROVIDERS)}"))
             else:
                 cfg["provider"] = p
-                cfg["model"] = rest[1] if len(rest) > 1 else ""
+                cfg["model"] = ""
                 cfg.pop("_fallback_from", None)
                 cfg.pop("_fallback_model", None)
                 client.switched_from = None
-                save_config(cfg)
                 client._plan = None
+                if len(rest) > 1:
+                    from . import lifeline
+                    with Spinner("checking the model name"):
+                        new, note, verified = lifeline.verify_model(cfg, " ".join(rest[1:]), client)
+                    cfg["model"] = new
+                    if note:
+                        print(yellow(f"  ↳ {note}"))
+                save_config(cfg)
         print(f"provider: {bold(client.provider)}  model: {bold(client.model or '(default)')}  url: {dim(client.base_url or '(cli)')}"
               + (yellow("  [session fallback — /provider keep to save]") if cfg.get("_fallback_from") else ""))
+
+    elif name in ("sampling", "temperature", "tune"):
+        from . import sampling
+        out = sampling.handle(cfg, client, rest)
+        if out:
+            print(out)
 
     elif name in ("fix", "lifeline", "fallbacks"):
         from . import lifeline
@@ -212,7 +232,11 @@ def handle_slash(cmd, ctx):
 
     elif name == "config":
         if len(rest) >= 2:
-            set_config_path(cfg, rest[0], rest_raw.split(maxsplit=1)[1])
+            value = rest_raw.split(maxsplit=1)[1]
+            if rest[0] == "model":
+                from .config import normalize_model
+                value = normalize_model(cfg.get("provider", "anthropic"), value)
+            set_config_path(cfg, rest[0], value)
             save_config(cfg)
             print(green("saved"))
         from .config import DEFAULT_CONFIG
@@ -401,7 +425,9 @@ def handle_slash(cmd, ctx):
 
     elif name == "import":
         from .wizard import run_import
-        run_import(cfg)
+        drives = True if any(r in ("--drives", "--all-drives", "drives") for r in rest) else None
+        paths = [r for r in rest if not r.startswith("--") and r != "drives"]
+        run_import(cfg, paths=paths, drives=drives)
         app.skills = discover_skills()
         ctx.custom_cmds = discover_commands()
         rebuild()
@@ -500,4 +526,4 @@ SLASH_NAMES = ["/help", "/mode", "/model", "/models", "/provider", "/skills", "/
                "/config", "/permissions", "/cost", "/clear", "/compact", "/init", "/memory", "/remember", "/memories",
                "/forget", "/conscience", "/ledger", "/status", "/order", "/about", "/tidy", "/backup", "/ship", "/release",
                "/banner", "/index", "/search", "/import", "/plans", "/ride", "/gui", "/doctor", "/diff", "/git", "/theme",
-               "/intro", "/export", "/commands", "/fix", "/lifeline", "/exit"]
+               "/intro", "/export", "/commands", "/fix", "/lifeline", "/sampling", "/exit"]

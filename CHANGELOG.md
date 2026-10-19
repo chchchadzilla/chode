@@ -3,6 +3,45 @@
 All notable changes to CHODE are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](https://semver.org/).
 
+## [1.0.2] - 2026-10-19
+
+The "it still didn't work" release — from a real first-run failure: `HTTP 400 from anthropic: "temperature is
+deprecated for this model."`, a saved model name of `anthropic/opus-5.5`, and a trailing "tip: run chode import".
+
+### Added
+- **Model names, normalized and verified.** `config.normalize_model` turns human spellings into API ids
+  (`anthropic/opus-5.5` / `Opus 5.5` → `claude-opus-5-5`, `gpt5 mini` → `gpt-5-mini`, `models/gemini-2.5-flash` →
+  `gemini-2.5-flash`; OpenRouter ids untouched) — applied on config load, `/model`, `/provider p m`, `/config model`,
+  `chode --model`, the wizard and the fixer. `lifeline.verify_model` then checks the name against the provider's **live**
+  model list the moment it is set and announces the correction (`'mock-l' isn't a model local knows → using 'mock-1'`);
+  it never replaces a totally unrelated name.
+- **Parameter self-healing.** A 400 that names a request setting (`temperature`, `top_p`, `top_k`, `max_tokens` …) drops
+  it (or renames `max_tokens` → `max_completion_tokens`), retries, and remembers it **per model** (`param_quirks`).
+  Known cases are gated up front: Claude 4.7+/5.x and OpenAI reasoning models get no sampling params; Claude ≤ 4.6,
+  OpenRouter, Ollama, Groq, Gemini … do.
+- **`/sampling`** (also `chode sampling`, launcher menu → *Tuning*, an optional wizard step): see exactly what is sent to
+  the current model and why anything is withheld; set temperature / top_p / top_k **globally, per provider or per
+  model** (`sampling.overrides`); `default` = let the provider decide; `edit` opens a submenu; `reset`, `forget`.
+  A per-model override deliberately bypasses the gate and clears a remembered rejection.
+- **The failure block.** Every connection failure (wizard test, `chode health`, in-session) now prints
+  `lifeline.what_now`: *what happened* · *what CHODE already did* · *do this now* (specific per error kind: keys page +
+  env var + key prefix for `auth`; the corrected name for `not_found`; the setting to flip for a rejected parameter;
+  `ollama serve` for a dead local server; proxy/base-URL for `network`) · *three free ways out for this machine* ·
+  `/fix` / `chode fix`. `PROVIDER_KEYS` (where to get a key) and `KEY_PREFIXES` added. The import tip only prints after
+  a successful test.
+- **Import from other drives and any folder.** `chode import --drives` / `/import --drives` (or yes when asked) walks
+  every other mounted drive — Windows drive letters, `/Volumes/*`, `/media/*`, `/run/media/*/*`, `/mnt/*` incl. WSL's
+  `/mnt/c` — bounded (depth ≤ 4, seconds per drive, system/media folders skipped) for agent homes (`.claude`, `.codex`,
+  `.cursor` … under any `Users/<name>`) and stray `SKILL.md` folders, labelled `Claude Code @ E:` / `skills folder @ E:`.
+  `chode import <folder…>` / `/import <folder>` takes a skill, a skills folder, a copied `~/.claude` or a project.
+- Mock server: `reject_params`. 15 new tests (86 total).
+
+### Fixed
+- Command flags after a sub-command (`chode import --yes`, `chode index --full`, `chode ship --no-push`,
+  `chode release --draft`, `chode order --json`) were rejected by argparse; they now reach the command.
+- `bad_request` hint for a rejected parameter no longer says "try another model".
+- The fixer's `set_config` accepts `sampling.*`; Claude Code settings found on other drives keep their drive label.
+
 ## [1.0.1] - 2026-10-17
 
 ### Added

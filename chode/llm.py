@@ -12,6 +12,7 @@ Resilience (the lifeline):
     (other keys → local servers → keyless free) and keeps going
 """
 import json
+import re
 import time
 
 import requests
@@ -229,6 +230,70 @@ class LLMClient:
             from . import lifeline
             lifeline.remember_good(self.cfg, *key)
 
+    # -- parameter self-healing ---------------------------------------------------
+    # Providers retire request parameters (Anthropic 4.7+/5.x: temperature/top_p/top_k; OpenAI reasoning
+    # models: temperature, max_tokens→max_completion_tokens; some local servers: stream_options).
+    # Instead of dying on the 400, drop the offending parameter, retry, and remember it for this model.
+
+    _REJECT_WORDS = ("deprecated", "not supported", "unsupported", "unknown", "unrecognized", "not allowed",
+                     "does not support", "cannot be used", "not permitted", "removed", "extra inputs", "invalid")
+    _NEVER_DROP = ("model", "messages", "system", "tools", "stream")
+
+    def _quirks(self):
+        return self.cfg.setdefault("param_quirks", {}).setdefault(self.model, [])
+
+    def _apply_quirks(self, payload):
+        for p in list(self._quirks()):
+            if p == "max_tokens" and "max_tokens" in payload and self.api_style != "anthropic":
+                payload["max_completion_tokens"] = payload.pop("max_tokens")
+            else:
+                payload.pop(p, None)
+        return payload
+
+    def _offending_param(self, message, payload):
+        low = (message or "").lower()
+        if not any(w in low for w in self._REJECT_WORDS):
+            return None
+        for key in payload:
+            if key in self._NEVER_DROP:
+                continue
+            if re.search(r"(?<![a-z_])" + re.escape(key.lower()) + r"(?![a-z_])", low):
+                return key
+        return None
+
+    def _remember_quirk(self, param):
+        from .paths import CONFIG_FILE
+        q = self._quirks()
+        if param not in q:
+            q.append(param)
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+            data.setdefault("param_quirks", {})[self.model] = list(q)
+            CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _post_healing(self, url, headers, payload, stream=False):
+        self._apply_quirks(payload)
+        for _ in range(4):
+            try:
+                return self._post(url, headers, payload, stream=stream)
+            except LLMError as e:
+                if e.status != 400:
+                    raise
+                param = self._offending_param(str(e), payload)
+                if not param:
+                    raise
+                if param == "max_tokens" and self.api_style != "anthropic":
+                    payload["max_completion_tokens"] = payload.pop("max_tokens")
+                else:
+                    payload.pop(param, None)
+                self._remember_quirk(param)
+                self._notify(f"{self.provider} rejected `{param}` for {self.model} — dropped it and retried (remembered for this model)")
+        raise LLMError(f"{self.provider} kept rejecting the request shape", kind="bad_request", provider=self.provider,
+                       model=self.model)
+
     # -- HTTP with retries ------------------------------------------------------
 
     def _post(self, url, headers, payload, stream=False):
@@ -296,10 +361,58 @@ class LLMClient:
                            provider=self.provider, model=self.model, hint=lifeline.hint("network", self.provider, self.model))
 
     # ---- anthropic ----
+    @staticmethod
+    def _anthropic_accepts_sampling(model):
+        """Claude 4.7, 4.8 and the 5 family reject temperature/top_p/top_k (400). Only send sampling
+        params to the models that still take them (3.x, 4, 4.1, 4.5, 4.6)."""
+        m = (model or "").lower()
+        if re.search(r"fable|mythos", m):
+            return False
+        if m.startswith("claude-3"):
+            return True
+        mm = re.search(r"claude-(?:opus|sonnet|haiku)-(\d+)(?:-(\d{1,2})(?!\d))?", m)
+        if not mm:
+            return False
+        major = int(mm.group(1))
+        minor = int(mm.group(2)) if mm.group(2) else 0
+        return major < 4 or (major == 4 and minor <= 6)
+
+    def sampling(self):
+        """Effective sampling params for the current provider/model: global defaults, then per-provider,
+        then per-model overrides (config `sampling`). None means 'let the provider decide'."""
+        s = self.cfg.get("sampling") or {}
+        out = {"temperature": s.get("temperature", self.cfg.get("temperature")), "top_p": s.get("top_p"), "top_k": s.get("top_k")}
+        overrides = s.get("overrides") or {}
+        for key in (self.provider, self.model, f"{self.provider}/{self.model}"):
+            for k, v in (overrides.get(key) or {}).items():
+                if k in out:
+                    out[k] = v
+        return {k: v for k, v in out.items() if v is not None}
+
+    def _explicit_model_override(self):
+        """Did the user set sampling for THIS model on purpose? Then we send it even past the model gate
+        (and let parameter self-healing drop it if the provider still says no)."""
+        overrides = (self.cfg.get("sampling") or {}).get("overrides") or {}
+        return any(overrides.get(k) for k in (self.model, f"{self.provider}/{self.model}"))
+
+    def sampling_gate(self):
+        """Why sampling params are withheld for the current provider/model, or None when they're sent.
+        Single source of truth for the request builders and for `/sampling`."""
+        if self.api_style == "plan":
+            return "plan providers take no sampling settings (the vendor CLI decides)"
+        if self._explicit_model_override():
+            return None
+        if self.api_style == "anthropic" and not self._anthropic_accepts_sampling(self.model):
+            return "Claude 4.7+/5.x reject temperature/top_p/top_k"
+        if self.provider == "openai" and self.model.startswith(("gpt-5", "o1", "o3", "o4")):
+            return "OpenAI reasoning models reject temperature/top_p/top_k"
+        return None
+
     def _chat_anthropic(self, system, messages, tools, on_text):
-        payload = {"model": self.model, "max_tokens": self.cfg["max_tokens"],
-                   "temperature": self.cfg["temperature"], "system": system,
+        payload = {"model": self.model, "max_tokens": self.cfg["max_tokens"], "system": system,
                    "messages": self._to_anthropic(messages)}
+        if self.sampling_gate() is None:
+            payload.update(self.sampling())
         if tools:
             payload["tools"] = [{"name": t["name"], "description": t["description"],
                                  "input_schema": t["input_schema"]} for t in tools]
@@ -307,9 +420,9 @@ class LLMClient:
                    "content-type": "application/json"}
         url = f"{self.base_url}/v1/messages"
         if not on_text:
-            return self._parse_anthropic(self._post(url, headers, payload).json())
+            return self._parse_anthropic(self._post_healing(url, headers, payload).json())
         payload["stream"] = True
-        r = self._post(url, headers, payload, stream=True)
+        r = self._post_healing(url, headers, payload, stream=True)
         if "text/event-stream" not in (r.headers.get("Content-Type") or ""):
             parsed = self._parse_anthropic(r.json())
             if parsed["content"]:
@@ -391,23 +504,17 @@ class LLMClient:
             payload["max_completion_tokens"] = self.cfg["max_tokens"]
         else:
             payload["max_tokens"] = self.cfg["max_tokens"]
-            payload["temperature"] = self.cfg["temperature"]
+        if self.sampling_gate() is None:
+            payload.update(self.sampling())
         if tools:
             payload["tools"] = [{"type": "function", "function": {
                 "name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in tools]
         headers, url = self._openai_headers_url()
         if not on_text:
-            return self._parse_openai(self._post(url, headers, payload).json())
+            return self._parse_openai(self._post_healing(url, headers, payload).json())
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
-        try:
-            r = self._post(url, headers, payload, stream=True)
-        except LLMError as e:
-            if "stream_options" in str(e):
-                payload.pop("stream_options", None)
-                r = self._post(url, headers, payload, stream=True)
-            else:
-                raise
+        r = self._post_healing(url, headers, payload, stream=True)
         if "text/event-stream" not in (r.headers.get("Content-Type") or ""):
             parsed = self._parse_openai(r.json())
             if parsed["content"]:

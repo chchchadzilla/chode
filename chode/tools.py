@@ -180,8 +180,9 @@ TOOLS = [
     },
     {
         "name": "set_config",
-        "description": ("Change a CHODE setting and save it: provider, model, base_urls.<provider>, fallbacks, stream, "
-                        "max_tokens, temperature, mode. Never API keys (the user pastes those in `chode setup`)."),
+        "description": ("Change a CHODE setting and save it: provider, model (normalized and checked against the live list), "
+                        "base_urls.<provider>, fallbacks, stream, max_tokens, sampling.temperature / sampling.top_p / "
+                        "sampling.top_k, mode. Never API keys (the user pastes those in `chode setup`)."),
         "input_schema": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}},
                          "required": ["key", "value"]},
         "safe": False,
@@ -592,6 +593,7 @@ def tool_test_connection(args):
 
 
 SETTABLE = ("provider", "model", "fallbacks", "stream", "max_tokens", "temperature", "mode", "retries", "theme", "name")
+SETTABLE_PREFIXES = ("base_urls.", "rag.", "plans.", "memory.", "order.", "sampling.")
 
 
 def tool_set_config(args):
@@ -600,8 +602,8 @@ def tool_set_config(args):
     key, value = (args.get("key") or "").strip(), str(args.get("value", "")).strip()
     if key.startswith("api_keys") or "key" in key.lower().split(".")[-1]:
         return "Refused: API keys are only ever entered by the user (chode setup)."
-    if not (key in SETTABLE or key.startswith("base_urls.") or key.startswith(("rag.", "plans.", "memory.", "order."))):
-        return f"Refused: '{key}' is not a setting the fixer may change. Allowed: {', '.join(SETTABLE)}, base_urls.*"
+    if not (key in SETTABLE or key.startswith(SETTABLE_PREFIXES)):
+        return f"Refused: '{key}' is not a setting the fixer may change. Allowed: {', '.join(SETTABLE)}, base_urls.*, sampling.*"
     if key == "provider" and value not in PROVIDERS:
         return f"Error: unknown provider '{value}'. Known: {', '.join(PROVIDERS)}"
     if key == "mode" and value not in MODES:
@@ -610,6 +612,16 @@ def tool_set_config(args):
         a.cfg["model"] = ""
         a.cfg.pop("_fallback_from", None)
         a.cfg.pop("_fallback_model", None)
+    if key == "model":
+        # normalize what was typed and check it against the live list, so "anthropic/opus-5.5" becomes claude-opus-5-5
+        from . import lifeline
+        new, note, verified = lifeline.verify_model(a.cfg, value, a.client)
+        a.cfg["model"] = new
+        if a.client is not None:
+            a.client._plan = None
+        save_config(a.cfg)
+        return (f"Set model = {new!r} and saved to config." + (f" Note: {note}" if note else "")
+                + ("" if verified else " (not verified against the live list — test_connection will tell)"))
     set_config_path(a.cfg, key, value)
     if a.client is not None:
         a.client._plan = None
