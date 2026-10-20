@@ -85,6 +85,56 @@ def test_apply_is_idempotent_and_redacts(project):
     assert any(l.startswith("= skill deploy") for l in again)
 
 
+def test_scan_other_drives_and_named_paths(project, tmp_path_factory):
+    """Skills on an external drive: a copied home (E:\\Users\\bob\\.claude) and a stray folder of SKILL.md dirs,
+    plus `chode import <folder>` pointing at one skill, a skills folder and a project."""
+    from chode.importer import classify_path, find_on_volume, volume_label
+    tmp, cfg, app = project
+    vol = tmp_path_factory.mktemp("USB-BACKUP")
+    old_home = vol / "Users" / "bob"
+    (old_home / ".claude" / "skills" / "ext-deploy").mkdir(parents=True)
+    (old_home / ".claude" / "skills" / "ext-deploy" / "SKILL.md").write_text("---\nname: ext-deploy\ndescription: from the usb\n---\nsteps\n", encoding="utf-8")
+    (old_home / ".claude" / "CLAUDE.md").write_text("# old laptop rules\nAlways write tests first, every single time.\n", encoding="utf-8")
+    (old_home / ".codex" / "prompts").mkdir(parents=True)
+    (old_home / ".codex" / "prompts" / "ship.md").write_text("Ship it: $ARGUMENTS\n", encoding="utf-8")
+    stray = vol / "stuff" / "my-skills"
+    (stray / "stray-one").mkdir(parents=True)
+    (stray / "stray-one" / "SKILL.md").write_text("---\nname: stray-one\ndescription: loose skill\n---\nbody\n", encoding="utf-8")
+    (vol / "Windows" / "System32" / "nope").mkdir(parents=True)          # never walked
+    (vol / "Windows" / "System32" / "nope" / "SKILL.md").write_text("---\nname: nope\n---\n", encoding="utf-8")
+    homes, roots = find_on_volume(vol)
+    assert old_home.resolve() in [h.resolve() for h in homes]
+    assert stray.resolve() in [r.resolve() for r in roots] and not any("Windows" in str(r) for r in roots)
+    items = scan(cfg, tmp, volumes=[vol])
+    by = {(it.kind, it.name): it for it in items}
+    label = volume_label(vol)
+    assert by[("skill", "ext-deploy")].agent == f"Claude Code @ {label}"
+    assert by[("skill", "stray-one")].agent == f"skills folder @ {label}"
+    assert by[("command", "ship")].agent == f"Codex @ {label}"
+    assert any(it.kind == "memory" and "CLAUDE.md" in it.name and it.agent.endswith(label) for it in items)
+    assert ("skill", "nope") not in by
+    # named paths: a single skill, a skills folder, a copied home, a project with .cursorrules
+    proj = tmp_path_factory.mktemp("someproject")
+    (proj / ".cursorrules").write_text("Project rule: tabs not spaces, always and forever.\n", encoding="utf-8")
+    assert classify_path(stray / "stray-one") == "skill" and classify_path(stray) == "skills_root"
+    assert classify_path(old_home) == "home" and classify_path(proj) == "project"
+    items = scan(cfg, tmp, paths=[str(stray / "stray-one"), str(old_home), str(proj)])
+    kinds = {(it.kind, it.name) for it in items}
+    assert ("skill", "stray-one") in kinds and ("skill", "ext-deploy") in kinds
+    assert any(k == "memory" and ".cursorrules" in n for k, n in kinds)
+    report = apply([it for it in items if it.kind == "skill"], cfg, tmp)
+    assert (GLOBAL_SKILLS_DIR / "stray-one" / "SKILL.md").exists() and (GLOBAL_SKILLS_DIR / "ext-deploy" / "SKILL.md").exists()
+    assert sum(1 for l in report if l.startswith("✓ skill")) == 2
+
+
+def test_external_volumes_never_includes_home_or_root(monkeypatch):
+    from chode.importer import external_volumes
+    vols = external_volumes()            # whatever this machine has mounted: must be dirs, never / or $HOME
+    for v in vols:
+        assert Path(v).is_dir() and Path(v).resolve() != Path("/")
+        assert not str(Path(os.environ["HOME"]).resolve()).startswith(str(Path(v).resolve()))
+
+
 def test_mcp_from_obj_and_toml():
     found = mcp_from_obj({"x": {"mcpServers": {"a": {"command": "c", "args": ["1"]}, "b": {"url": "https://u"}, "bad": {"disabled": True, "command": "c"}}}})
     assert set(found) == {"a", "b"} and found["b"]["transport"] == "http"

@@ -26,9 +26,12 @@ PROVIDERS = {
     "moonshot":   ("openai",    "https://api.moonshot.ai/v1",    "MOONSHOT_API_KEY",   "kimi-k2-0905-preview"),
     "perplexity": ("openai",    "https://api.perplexity.ai",     "PERPLEXITY_API_KEY", "sonar"),
     "azure":      ("azure",     "",                              "AZURE_OPENAI_API_KEY", ""),
+    "huggingface": ("openai",   "https://router.huggingface.co/v1", "HF_TOKEN",        "Qwen/Qwen2.5-Coder-32B-Instruct"),
     "ollama":     ("openai",    "http://localhost:11434/v1",     "",                   "qwen3-coder"),
     "lmstudio":   ("openai",    "http://localhost:1234/v1",      "",                   ""),
     "local":      ("openai",    "http://localhost:8080/v1",      "",                   ""),
+    # ---- keyless, free, community-run — the last rung of the lifeline ladder ----
+    "pollinations": ("openai",  "https://text.pollinations.ai/openai", "",             "openai"),
     # ---- Plan Bridge: ride the subscription you already pay for (no API key) ----
     "claude-plan": ("plan", "", "", "sonnet"),
     "codex-plan":  ("plan", "", "", ""),
@@ -50,20 +53,56 @@ PROVIDER_NOTES = {
     "moonshot":   "Kimi K2 · MOONSHOT_API_KEY",
     "perplexity": "Sonar (search-grounded) · PERPLEXITY_API_KEY",
     "azure":      "Azure OpenAI · AZURE_OPENAI_API_KEY + deployment URL",
+    "huggingface": "Hugging Face Inference (free tier) · HF_TOKEN",
     "ollama":     "local, no key, FREE — ollama serve on :11434",
     "lmstudio":   "local, no key, FREE — LM Studio server on :1234",
     "local":      "any OpenAI-compatible server (llama.cpp, vLLM, LiteLLM, Jan, Kobold…)",
+    "pollinations": "FREE, no key, no signup — community-run, rate-limited, best effort",
     "claude-plan": "your Claude Pro/Max plan via the `claude` CLI — no API key",
     "codex-plan":  "your ChatGPT Plus/Pro plan via the `codex` CLI — no API key",
     "gemini-plan": "your Google AI Pro/Ultra plan via the `gemini` CLI — no API key",
     "custom-plan": "any other agent CLI (configure a command template)",
 }
 
-# Aliases accepted by /model for the anthropic provider.
+# Aliases accepted by /model for the anthropic provider. When the API can list models, the alias
+# resolves to the NEWEST matching id at runtime (see lifeline.resolve_alias); these are the fallbacks.
 MODEL_ALIASES = {
     "anthropic": {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5",
                   "haiku": "claude-haiku-5-5", "fable": "claude-fable-5-1"},
 }
+
+# If the configured model 404s, these are tried in order before giving up on the provider.
+MODEL_FALLBACKS = {
+    "anthropic": ["claude-sonnet-5-5", "claude-sonnet-4-5", "claude-sonnet-4-5-20250929", "claude-sonnet-4-20250514",
+                  "claude-3-5-sonnet-latest"],
+    "openai": ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"],
+    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+    "xai": ["grok-4", "grok-3", "grok-3-mini"],
+    "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "qwen/qwen3-32b"],
+    "openrouter": ["qwen/qwen3-coder:free", "meta-llama/llama-3.3-70b-instruct:free", "openrouter/auto"],
+    "mistral": ["devstral-medium-latest", "mistral-small-latest", "mistral-large-latest"],
+    "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+    "cerebras": ["llama-3.3-70b", "qwen-3-32b"],
+    "ollama": ["qwen3-coder", "qwen2.5-coder:7b", "qwen3:8b", "qwen3:4b", "llama3.2:3b"],
+    "pollinations": ["openai", "openai-large", "mistral"],
+}
+
+# Free tiers you can sign up for in about two minutes, no card. (Limits change; links are the source of truth.)
+FREE_TIERS = {
+    "gemini":     {"signup": "https://aistudio.google.com/apikey", "model": "gemini-2.5-flash",
+                   "note": "generous free tier, strong tool calling"},
+    "groq":       {"signup": "https://console.groq.com/keys", "model": "llama-3.3-70b-versatile",
+                   "note": "very fast, free tier with daily limits"},
+    "openrouter": {"signup": "https://openrouter.ai/keys", "model": "qwen/qwen3-coder:free",
+                   "note": "many ':free' models, some with tool calling"},
+    "mistral":    {"signup": "https://console.mistral.ai/api-keys", "model": "mistral-small-latest",
+                   "note": "free 'experiment' tier"},
+    "cerebras":   {"signup": "https://cloud.cerebras.ai", "model": "llama-3.3-70b",
+                   "note": "fastest inference, free tier"},
+    "huggingface": {"signup": "https://huggingface.co/settings/tokens", "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+                    "note": "free monthly credits"},
+}
+KEYLESS = ("ollama", "lmstudio", "local", "pollinations")
 
 MODES = ("plan", "ask", "edits", "yolo")
 MODE_ICONS = {"plan": "🔍", "ask": "🛡", "edits": "✏️", "yolo": "🔥"}
@@ -76,7 +115,11 @@ DEFAULT_CONFIG = {
     "provider": "anthropic",
     "model": "",
     "max_tokens": 8192,
-    "temperature": 0.2,
+    "temperature": 0.2,             # legacy alias for sampling.temperature
+    # Sampling is sent by default; a model that rejects a param gets it dropped and remembered (param_quirks).
+    # Per-provider / per-model overrides: "overrides": {"openrouter": {"temperature": 0.7}, "ollama/qwen3:8b": {"top_k": 40}}
+    # null = let the provider decide. Edit interactively with /sampling.
+    "sampling": {"temperature": 0.2, "top_p": None, "top_k": None, "overrides": {}},
     "stream": True,
     "base_urls": {},
     "api_keys": {},
@@ -117,9 +160,16 @@ DEFAULT_CONFIG = {
     "gui": {"port": 7331, "open_browser": True},
     "banner": {"image_provider": "auto"},
     "agents": {"subagent_model": "", "max_depth": 2},
+    # ---- lifeline: never die on a connection error ----
+    "fallbacks": "auto",            # "auto" = any provider with a key → local servers → keyless free; a list of
+                                    # "provider" or "provider:model" strings to control the order; false = off
+    "retries": 3,                   # network / 429 / 5xx retries per request (exponential backoff)
+    "last_known_good": {},          # {"provider": ..., "model": ...} — remembered automatically
+    "param_quirks": {},             # {model: ["temperature", ...]} — request params a model rejected; learned automatically
 }
 
-_NESTED = ("memory", "conscience", "order", "rag", "publish", "plans", "gui", "banner", "agents")
+_NESTED = ("memory", "conscience", "order", "rag", "publish", "plans", "gui", "banner", "agents", "last_known_good",
+           "param_quirks", "sampling")
 
 
 def _deep_merge(base, override):
@@ -171,13 +221,59 @@ def load_config(cwd=None):
     if cfg.get("provider") not in PROVIDERS:
         print(yellow(f"warning: unknown provider '{cfg.get('provider')}' — falling back to anthropic"))
         cfg["provider"] = "anthropic"
+    # legacy top-level temperature (pre-1.0.2 configs) feeds sampling.temperature
+    if user and "temperature" in user and "sampling" not in user:
+        cfg["sampling"]["temperature"] = user["temperature"]
+    # normalize a human-typed model name ("anthropic/opus-5.5" → "claude-opus-5-5")
+    if cfg.get("model"):
+        cfg["model"] = normalize_model(cfg["provider"], cfg["model"])
     return cfg
+
+
+def normalize_model(provider, name):
+    """Turn what a human typed into what the provider's API expects. Pure, no network:
+    'anthropic/opus-5.5' → 'claude-opus-5-5' · 'Opus 5.5' → 'claude-opus-5-5' · 'gpt 5 mini' → 'gpt-5-mini'
+    OpenRouter keeps 'vendor/model' ids (that IS its format)."""
+    import re
+    n = (name or "").strip()
+    if not n:
+        return n
+    style = PROVIDERS.get(provider, ("openai",))[0]
+    if style == "plan":
+        return n.lower().replace(" ", "")
+    low = n.lower().strip()
+    if provider != "openrouter" and "/" in low:
+        vendor, _, rest = low.partition("/")
+        if vendor in ("anthropic", "openai", "google", "x-ai", "xai", "meta-llama", "mistralai", "deepseek", "qwen", "groq"):
+            low = rest
+    low = re.sub(r"\s+", "-", low)
+    if provider == "anthropic":
+        low = low.replace(".", "-").replace("_", "-")
+        low = re.sub(r"^(claude-)?(opus|sonnet|haiku|fable|mythos)[- ]?(\d)", r"claude-\2-\3", low)
+        low = re.sub(r"^claude-(\d)", r"claude-\1", low)
+        # "claude-3.5-sonnet" style → keep as typed (3-5-sonnet is the real id shape for 3.x)
+        return low
+    if provider == "openai":
+        low = re.sub(r"^gpt-?(\d)", r"gpt-\1", low).replace(" ", "-")
+        return low
+    if provider == "gemini":
+        low = re.sub(r"^(google-|models/)", "", low)
+        low = re.sub(r"^gemini-?(\d)", r"gemini-\1", low)
+        return low
+    if provider == "xai":
+        low = re.sub(r"^grok-?(\d)", r"grok-\1", low)
+        return low
+    return n if provider == "openrouter" else low
 
 
 def save_config(cfg):
     """Persist user-level config (project-only overlays are stripped back out)."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     persisted = {k: v for k, v in cfg.items() if k in DEFAULT_CONFIG}
+    if cfg.get("_fallback_from"):
+        # a session-only fallback must never silently become the default (see lifeline.py / `/provider keep`)
+        persisted["provider"] = cfg["_fallback_from"]
+        persisted["model"] = cfg.get("_fallback_model", "")
     proj_only = set(cfg.get("_project_mcp", []))
     if proj_only:
         persisted["mcp_servers"] = {k: v for k, v in persisted.get("mcp_servers", {}).items()
@@ -284,6 +380,7 @@ def price_for(model):
 def resolve_model(cfg):
     provider = cfg.get("provider", "anthropic")
     model = cfg.get("model") or PROVIDERS[provider][3]
+    model = normalize_model(provider, model) if cfg.get("model") else model
     return MODEL_ALIASES.get(provider, {}).get(model, model)
 
 

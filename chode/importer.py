@@ -13,6 +13,9 @@ Amp, Junie, OpenClaw and Hermes, and converts what it finds into CHODE gear:
   hooks                 → hooks (Claude Code format works as-is)
   VS Code extensions    → report of what CHODE replaces
 
+Looks in this machine's home + the current project by default; `chode import --drives` also searches other
+mounted drives (D:, /Volumes/*, /media/*, /mnt/* …) for agent folders and SKILL.md skills, and
+`chode import <folder>` takes any folder you point at (a skill, a skills folder, a copied ~/.claude, a project).
 Nothing is written until you say so. Nothing is ever deleted from the source.
 """
 import json
@@ -21,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config import save_config
@@ -32,136 +36,290 @@ from .skills import discover_skills, parse_frontmatter, strip_frontmatter
 HOME = Path.home()
 
 
-def _vscode_user_dirs():
-    """User dirs for VS Code family editors (Code, Insiders, Cursor, Windsurf, Antigravity, VSCodium)."""
-    if IS_WIN:
-        base = Path(os.environ.get("APPDATA", HOME / "AppData" / "Roaming"))
-        names = ["Code", "Code - Insiders", "Cursor", "Windsurf", "Antigravity", "VSCodium", "Trae"]
-        return [(n, base / n / "User") for n in names]
-    if sys.platform == "darwin":
-        base = HOME / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
+def _vscode_user_dirs(home=None, external=False):
+    """User dirs for VS Code family editors (Code, Insiders, Cursor, Windsurf, Antigravity, VSCodium).
+    For a home on ANOTHER drive we can't trust env vars, so we try every platform layout under it."""
+    home = Path(home or HOME)
     names = ["Code", "Code - Insiders", "Cursor", "Windsurf", "Antigravity", "VSCodium", "Trae"]
-    return [(n, base / n / "User") for n in names]
+    bases = []
+    if external:
+        bases = [home / "AppData" / "Roaming", home / "Library" / "Application Support", home / ".config"]
+    elif IS_WIN:
+        bases = [Path(os.environ.get("APPDATA", HOME / "AppData" / "Roaming"))]
+    elif sys.platform == "darwin":
+        bases = [HOME / "Library" / "Application Support"]
+    else:
+        bases = [Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))]
+    return [(n, base / n / "User") for base in bases for n in names]
 
 
 # ---- where things live -------------------------------------------------------
 
-def sources(cwd=None):
-    """Yields (agent, kind, path) candidates. kind ∈ rules|skills_root|commands_root|agents_root|
-    mcp_json|settings_json|toml_config|prompts_root|extensions_dir|hooks_json"""
+def _user_sources(add, home, tag="", external=False):
+    """Everything an agent keeps under a home directory (~ on this machine, or Users/<name> on another drive)."""
+    home = Path(home)
+    cfgdir = home / ".config"
+    # Claude Code
+    add(f"Claude Code{tag}", "rules", home / ".claude" / "CLAUDE.md")
+    add(f"Claude Code{tag}", "skills_root", home / ".claude" / "skills")
+    add(f"Claude Code{tag}", "commands_root", home / ".claude" / "commands")
+    add(f"Claude Code{tag}", "agents_root", home / ".claude" / "agents")
+    add(f"Claude Code{tag}", "settings_json", home / ".claude" / "settings.json")
+    add(f"Claude Code{tag}", "mcp_json", home / ".claude.json")
+    # Codex
+    add(f"Codex{tag}", "toml_config", home / ".codex" / "config.toml")
+    add(f"Codex{tag}", "rules", home / ".codex" / "AGENTS.md")
+    add(f"Codex{tag}", "prompts_root", home / ".codex" / "prompts")
+    add(f"Codex{tag}", "skills_root", home / ".codex" / "skills")
+    # Gemini CLI / Antigravity
+    add(f"Gemini CLI{tag}", "settings_json", home / ".gemini" / "settings.json")
+    add(f"Gemini CLI{tag}", "rules", home / ".gemini" / "GEMINI.md")
+    add(f"Gemini CLI{tag}", "gemini_commands", home / ".gemini" / "commands")
+    add(f"Antigravity{tag}", "mcp_json", home / ".gemini" / "antigravity" / "mcp_config.json")
+    add(f"Antigravity{tag}", "mcp_json", home / ".antigravity" / "mcp_config.json")
+    add(f"Antigravity{tag}", "mcp_json", home / ".antigravity" / "mcp.json")
+    add(f"Antigravity{tag}", "rules_dir", home / ".gemini" / "antigravity" / "rules")
+    add(f"Antigravity{tag}", "extensions_dir", home / ".antigravity" / "extensions")
+    # Cursor / Windsurf
+    add(f"Cursor{tag}", "mcp_json", home / ".cursor" / "mcp.json")
+    add(f"Cursor{tag}", "extensions_dir", home / ".cursor" / "extensions")
+    add(f"Windsurf{tag}", "rules_dir", home / ".codeium" / "windsurf" / "memories")
+    add(f"Windsurf{tag}", "mcp_json", home / ".codeium" / "windsurf" / "mcp_config.json")
+    # Cline / Roo / Kilo (VS Code globalStorage) + VS Code family user settings
+    for editor, udir in _vscode_user_dirs(home, external=external):
+        gs = udir / "globalStorage"
+        add(f"Cline ({editor}){tag}", "mcp_json", gs / "saoudrizwan.claude-dev" / "settings" / "cline_mcp_settings.json")
+        add(f"Roo Code ({editor}){tag}", "mcp_json", gs / "rooveterinaryinc.roo-cline" / "settings" / "mcp_settings.json")
+        add(f"Kilo Code ({editor}){tag}", "mcp_json", gs / "kilocode.kilo-code" / "settings" / "mcp_settings.json")
+        add(f"VS Code ({editor}){tag}", "vscode_mcp", udir / "mcp.json")
+        add(f"VS Code ({editor}){tag}", "vscode_settings", udir / "settings.json")
+        add(f"Copilot ({editor}){tag}", "prompts_root", udir / "prompts")
+    add(f"Cline{tag}", "rules_dir", home / "Documents" / "Cline" / "Rules")
+    add(f"Roo Code{tag}", "rules_dir", home / ".roo" / "rules")
+    add(f"VS Code{tag}", "extensions_dir", home / ".vscode" / "extensions")
+    add(f"VS Code{tag}", "extensions_dir", home / ".vscode-insiders" / "extensions")
+    # Continue / OpenCode / Zed / Aider
+    add(f"Continue{tag}", "continue_config", home / ".continue" / "config.json")
+    add(f"Continue{tag}", "continue_config", home / ".continue" / "config.yaml")
+    add(f"Continue{tag}", "rules_dir", home / ".continue" / "rules")
+    add(f"OpenCode{tag}", "opencode_config", cfgdir / "opencode" / "opencode.json")
+    add(f"OpenCode{tag}", "commands_root", cfgdir / "opencode" / "command")
+    add(f"OpenCode{tag}", "agents_root", cfgdir / "opencode" / "agent")
+    add(f"Zed{tag}", "zed_settings", cfgdir / "zed" / "settings.json")
+    add(f"Aider{tag}", "aider_conf", home / ".aider.conf.yml")
+    # OpenClaw / Hermes (legacy names too)
+    for agent, root in (("OpenClaw", ".openclaw"), ("OpenClaw", ".config/openclaw"), ("OpenClaw", ".clawdbot"),
+                        ("OpenClaw", ".moltbot"), ("Hermes", ".hermes"), ("Hermes", ".hermes-agent"),
+                        ("Hermes", ".config/hermes")):
+        add(f"{agent}{tag}", "skills_root", home / root / "skills")
+        for cfgname in ("openclaw.json", "config.json", "hermes.json"):
+            add(f"{agent}{tag}", "mcp_json", home / root / cfgname)
+
+
+def _project_sources(add, cwd, tag=""):
+    """Everything an agent keeps inside a project folder."""
+    cwd = Path(cwd)
+    add(f"Claude Code{tag}", "rules", cwd / "CLAUDE.md")
+    add(f"Claude Code{tag}", "rules", cwd / ".claude" / "CLAUDE.md")
+    add(f"Claude Code{tag}", "skills_root", cwd / ".claude" / "skills")
+    add(f"Claude Code{tag}", "commands_root", cwd / ".claude" / "commands")
+    add(f"Claude Code{tag}", "agents_root", cwd / ".claude" / "agents")
+    add(f"Claude Code{tag}", "settings_json", cwd / ".claude" / "settings.json")
+    add(f"Claude Code{tag}", "settings_json", cwd / ".claude" / "settings.local.json")
+    add(f"Claude Code{tag}", "mcp_json", cwd / ".mcp.json")
+    add(f"Codex{tag}", "rules", cwd / "AGENTS.md")
+    add(f"Codex{tag}", "skills_root", cwd / ".codex" / "skills")
+    add(f"Codex{tag}", "skills_root", cwd / ".agents" / "skills")
+    add(f"Gemini CLI{tag}", "rules", cwd / "GEMINI.md")
+    add(f"Gemini CLI{tag}", "settings_json", cwd / ".gemini" / "settings.json")
+    add(f"Gemini CLI{tag}", "gemini_commands", cwd / ".gemini" / "commands")
+    add(f"Antigravity{tag}", "rules_dir", cwd / ".agent" / "rules")
+    add(f"Antigravity{tag}", "workflows_dir", cwd / ".agent" / "workflows")
+    add(f"Cursor{tag}", "rules", cwd / ".cursorrules")
+    add(f"Cursor{tag}", "rules_dir", cwd / ".cursor" / "rules")
+    add(f"Cursor{tag}", "mcp_json", cwd / ".cursor" / "mcp.json")
+    add(f"Windsurf{tag}", "rules", cwd / ".windsurfrules")
+    add(f"Windsurf{tag}", "rules_dir", cwd / ".windsurf" / "rules")
+    add(f"Cline{tag}", "rules", cwd / ".clinerules")
+    add(f"Cline{tag}", "rules_dir", cwd / ".clinerules")
+    add(f"Roo Code{tag}", "rules_dir", cwd / ".roo" / "rules")
+    add(f"Kilo Code{tag}", "rules_dir", cwd / ".kilocode" / "rules")
+    add(f"VS Code{tag}", "vscode_mcp", cwd / ".vscode" / "mcp.json")
+    add(f"VS Code{tag}", "vscode_settings", cwd / ".vscode" / "settings.json")
+    add(f"Copilot{tag}", "rules", cwd / ".github" / "copilot-instructions.md")
+    add(f"Copilot{tag}", "rules_dir", cwd / ".github" / "instructions")
+    add(f"Copilot{tag}", "prompts_root", cwd / ".github" / "prompts")
+    add(f"Copilot{tag}", "agents_root", cwd / ".github" / "agents")
+    add(f"Continue{tag}", "rules_dir", cwd / ".continue" / "rules")
+    add(f"OpenCode{tag}", "opencode_config", cwd / "opencode.json")
+    add(f"OpenCode{tag}", "commands_root", cwd / ".opencode" / "command")
+    add(f"OpenCode{tag}", "agents_root", cwd / ".opencode" / "agent")
+    add(f"Zed{tag}", "rules", cwd / ".rules")
+    add(f"Kiro{tag}", "rules_dir", cwd / ".kiro" / "steering")
+    add(f"Amp{tag}", "rules", cwd / "AGENT.md")
+    add(f"Junie{tag}", "rules", cwd / ".junie" / "guidelines.md")
+    add(f"Aider{tag}", "rules", cwd / "CONVENTIONS.md")
+    add(f"Aider{tag}", "aider_conf", cwd / ".aider.conf.yml")
+
+
+def sources(cwd=None, homes=None):
+    """(agent, kind, path) candidates. kind ∈ rules|rules_dir|workflows_dir|skills_root|commands_root|prompts_root|
+    gemini_commands|agents_root|mcp_json|settings_json|toml_config|vscode_mcp|vscode_settings|zed_settings|
+    opencode_config|continue_config|aider_conf|extensions_dir.
+    homes: [(home_dir, tag)] — default is this machine's ~; [] means project-level only."""
     cwd = Path(cwd or Path.cwd())
     S = []
 
     def add(agent, kind, p):
         p = Path(p).expanduser()
-        if p.exists():
-            S.append((agent, kind, p))
+        try:
+            if p.exists():
+                S.append((agent, kind, p))
+        except OSError:
+            pass
 
-    # Claude Code
-    add("Claude Code", "rules", HOME / ".claude" / "CLAUDE.md")
-    add("Claude Code", "skills_root", HOME / ".claude" / "skills")
-    add("Claude Code", "commands_root", HOME / ".claude" / "commands")
-    add("Claude Code", "agents_root", HOME / ".claude" / "agents")
-    add("Claude Code", "settings_json", HOME / ".claude" / "settings.json")
-    add("Claude Code", "mcp_json", HOME / ".claude.json")
-    add("Claude Code", "rules", cwd / "CLAUDE.md")
-    add("Claude Code", "rules", cwd / ".claude" / "CLAUDE.md")
-    add("Claude Code", "skills_root", cwd / ".claude" / "skills")
-    add("Claude Code", "commands_root", cwd / ".claude" / "commands")
-    add("Claude Code", "agents_root", cwd / ".claude" / "agents")
-    add("Claude Code", "settings_json", cwd / ".claude" / "settings.json")
-    add("Claude Code", "settings_json", cwd / ".claude" / "settings.local.json")
-    add("Claude Code", "mcp_json", cwd / ".mcp.json")
-    # Codex
-    add("Codex", "toml_config", HOME / ".codex" / "config.toml")
-    add("Codex", "rules", HOME / ".codex" / "AGENTS.md")
-    add("Codex", "prompts_root", HOME / ".codex" / "prompts")
-    add("Codex", "skills_root", HOME / ".codex" / "skills")
-    add("Codex", "rules", cwd / "AGENTS.md")
-    add("Codex", "skills_root", cwd / ".codex" / "skills")
-    add("Codex", "skills_root", cwd / ".agents" / "skills")
-    # Gemini CLI / Antigravity
-    add("Gemini CLI", "settings_json", HOME / ".gemini" / "settings.json")
-    add("Gemini CLI", "rules", HOME / ".gemini" / "GEMINI.md")
-    add("Gemini CLI", "gemini_commands", HOME / ".gemini" / "commands")
-    add("Gemini CLI", "rules", cwd / "GEMINI.md")
-    add("Gemini CLI", "settings_json", cwd / ".gemini" / "settings.json")
-    add("Gemini CLI", "gemini_commands", cwd / ".gemini" / "commands")
-    add("Antigravity", "mcp_json", HOME / ".gemini" / "antigravity" / "mcp_config.json")
-    add("Antigravity", "mcp_json", HOME / ".antigravity" / "mcp_config.json")
-    add("Antigravity", "mcp_json", HOME / ".antigravity" / "mcp.json")
-    add("Antigravity", "rules_dir", HOME / ".gemini" / "antigravity" / "rules")
-    add("Antigravity", "rules_dir", cwd / ".agent" / "rules")
-    add("Antigravity", "workflows_dir", cwd / ".agent" / "workflows")
-    add("Antigravity", "extensions_dir", HOME / ".antigravity" / "extensions")
-    # Cursor
-    add("Cursor", "rules", cwd / ".cursorrules")
-    add("Cursor", "rules_dir", cwd / ".cursor" / "rules")
-    add("Cursor", "mcp_json", HOME / ".cursor" / "mcp.json")
-    add("Cursor", "mcp_json", cwd / ".cursor" / "mcp.json")
-    add("Cursor", "extensions_dir", HOME / ".cursor" / "extensions")
-    # Windsurf
-    add("Windsurf", "rules", cwd / ".windsurfrules")
-    add("Windsurf", "rules_dir", cwd / ".windsurf" / "rules")
-    add("Windsurf", "rules_dir", HOME / ".codeium" / "windsurf" / "memories")
-    add("Windsurf", "mcp_json", HOME / ".codeium" / "windsurf" / "mcp_config.json")
-    # Cline / Roo / Kilo (VS Code globalStorage)
-    for editor, udir in _vscode_user_dirs():
-        gs = udir / "globalStorage"
-        add(f"Cline ({editor})", "mcp_json", gs / "saoudrizwan.claude-dev" / "settings" / "cline_mcp_settings.json")
-        add(f"Roo Code ({editor})", "mcp_json", gs / "rooveterinaryinc.roo-cline" / "settings" / "mcp_settings.json")
-        add(f"Kilo Code ({editor})", "mcp_json", gs / "kilocode.kilo-code" / "settings" / "mcp_settings.json")
-        add(f"VS Code ({editor})", "vscode_mcp", udir / "mcp.json")
-        add(f"VS Code ({editor})", "vscode_settings", udir / "settings.json")
-        add(f"Copilot ({editor})", "prompts_root", udir / "prompts")
-    add("Cline", "rules", cwd / ".clinerules")
-    add("Cline", "rules_dir", cwd / ".clinerules")
-    add("Cline", "rules_dir", HOME / "Documents" / "Cline" / "Rules")
-    add("Roo Code", "rules_dir", cwd / ".roo" / "rules")
-    add("Roo Code", "rules_dir", HOME / ".roo" / "rules")
-    add("Kilo Code", "rules_dir", cwd / ".kilocode" / "rules")
-    # VS Code workspace
-    add("VS Code", "vscode_mcp", cwd / ".vscode" / "mcp.json")
-    add("VS Code", "vscode_settings", cwd / ".vscode" / "settings.json")
-    add("VS Code", "extensions_dir", HOME / ".vscode" / "extensions")
-    add("VS Code", "extensions_dir", HOME / ".vscode-insiders" / "extensions")
-    # GitHub Copilot
-    add("Copilot", "rules", cwd / ".github" / "copilot-instructions.md")
-    add("Copilot", "rules_dir", cwd / ".github" / "instructions")
-    add("Copilot", "prompts_root", cwd / ".github" / "prompts")
-    add("Copilot", "agents_root", cwd / ".github" / "agents")
-    # Continue
-    add("Continue", "continue_config", HOME / ".continue" / "config.json")
-    add("Continue", "continue_config", HOME / ".continue" / "config.yaml")
-    add("Continue", "rules_dir", HOME / ".continue" / "rules")
-    add("Continue", "rules_dir", cwd / ".continue" / "rules")
-    # OpenCode
-    add("OpenCode", "opencode_config", HOME / ".config" / "opencode" / "opencode.json")
-    add("OpenCode", "opencode_config", cwd / "opencode.json")
-    add("OpenCode", "commands_root", HOME / ".config" / "opencode" / "command")
-    add("OpenCode", "agents_root", HOME / ".config" / "opencode" / "agent")
-    add("OpenCode", "commands_root", cwd / ".opencode" / "command")
-    add("OpenCode", "agents_root", cwd / ".opencode" / "agent")
-    # Zed
-    add("Zed", "zed_settings", HOME / ".config" / "zed" / "settings.json")
-    add("Zed", "rules", cwd / ".rules")
-    # Kiro / Amp / Junie / Aider
-    add("Kiro", "rules_dir", cwd / ".kiro" / "steering")
-    add("Amp", "rules", cwd / "AGENT.md")
-    add("Junie", "rules", cwd / ".junie" / "guidelines.md")
-    add("Aider", "rules", cwd / "CONVENTIONS.md")
-    add("Aider", "aider_conf", cwd / ".aider.conf.yml")
-    add("Aider", "aider_conf", HOME / ".aider.conf.yml")
-    # OpenClaw / Hermes (legacy names too)
-    for agent, root in (("OpenClaw", "~/.openclaw"), ("OpenClaw", "~/.config/openclaw"), ("OpenClaw", "~/.clawdbot"),
-                        ("OpenClaw", "~/.moltbot"), ("Hermes", "~/.hermes"), ("Hermes", "~/.hermes-agent"),
-                        ("Hermes", "~/.config/hermes")):
-        add(agent, "skills_root", Path(root).expanduser() / "skills")
-        for cfgname in ("openclaw.json", "config.json", "hermes.json"):
-            add(agent, "mcp_json", Path(root).expanduser() / cfgname)
+    for home, tag in ([(HOME, "")] if homes is None else homes):
+        _user_sources(add, home, tag, external=bool(tag))
+    _project_sources(add, cwd)
     return S
+
+
+# ---- other drives ------------------------------------------------------------
+#
+# "My skills live on the D: drive / on a USB stick / on the old laptop's disk." Scanning a whole drive is not
+# free, so this is bounded: a shallow walk (depth ≤ 4), a time budget per drive, and a skip list of folders
+# that never hold agent gear (Windows, Program Files, node_modules, …). Found = dirs that look like a home
+# (contain .claude/.codex/.cursor/…) and stray folders of SKILL.md skills.
+
+AGENT_MARKERS = (".claude", ".codex", ".gemini", ".cursor", ".codeium", ".continue", ".antigravity", ".roo",
+                 ".openclaw", ".hermes", ".kilocode", ".claude.json", ".aider.conf.yml")
+SKIP_WALK = set(SKIP_DIRS) | {"Windows", "Program Files", "Program Files (x86)", "ProgramData", "$RECYCLE.BIN",
+                              "System Volume Information", "Recovery", "PerfLogs", "AppData", "Library", "Applications",
+                              "System", "private", "proc", "sys", "dev", "run", "lost+found", "snap", "boot", "etc",
+                              ".Trash", ".Trashes", ".Spotlight-V100", ".fseventsd", ".TemporaryItems", "Steam",
+                              "steamapps", "Photos", "Pictures", "Music", "Movies", "Videos", "site-packages", ".npm",
+                              ".cargo", ".rustup", ".gradle", ".m2", ".nuget", "Downloads"}
+WALK_DEPTH = 4
+WALK_BUDGET_S = 6.0
+
+
+def volume_label(p):
+    p = Path(p)
+    if IS_WIN or re.match(r"^[A-Za-z]:[\\/]?$", str(p)):
+        return (p.drive or str(p)).upper()
+    return p.name or str(p)
+
+
+def _same_or_under(a, b):
+    try:
+        a, b = Path(a).resolve(), Path(b).resolve()
+        return a == b or b in a.parents
+    except Exception:
+        return False
+
+
+def external_volumes():
+    """Mounted drives other than the one your home is on: Windows drive letters, macOS /Volumes, Linux
+    /media · /run/media · /mnt (which is also where WSL shows the Windows drives, /mnt/c …)."""
+    found = []
+    if IS_WIN:
+        import string
+        skip = {(os.environ.get("SystemDrive") or "C:").rstrip("\\/").upper(), HOME.drive.upper()}
+        for letter in string.ascii_uppercase:
+            d = f"{letter}:"
+            if d in skip:
+                continue
+            p = Path(d + "\\")
+            try:
+                if p.exists() and next(p.iterdir(), None) is not None:
+                    found.append(p)
+            except Exception:
+                continue
+        return found
+    cands = []
+    if sys.platform == "darwin" and Path("/Volumes").is_dir():
+        cands += list(Path("/Volumes").iterdir())
+    for base in ("/media", "/run/media", "/mnt"):
+        b = Path(base)
+        if not b.is_dir():
+            continue
+        for p in b.iterdir():
+            cands.append(p)
+            if base in ("/media", "/run/media"):          # /media/<user>/<volume>
+                try:
+                    cands += [q for q in p.iterdir() if q.is_dir()]
+                except Exception:
+                    pass
+    seen = set()
+    for p in cands:
+        try:
+            if not p.is_dir():
+                continue
+            r = p.resolve()
+            if r == Path("/") or r in seen or _same_or_under(HOME, r):
+                continue
+            if sys.platform == "darwin" and r == Path("/System/Volumes/Data"):
+                continue
+            if next(p.iterdir(), None) is None:
+                continue
+            seen.add(r)
+            found.append(p)
+        except Exception:
+            continue
+    return found
+
+
+def _walk(root, max_depth=WALK_DEPTH, budget_s=WALK_BUDGET_S):
+    """Bounded breadth-first walk yielding directories (root first)."""
+    t0 = time.time()
+    frontier = [(Path(root), 0)]
+    while frontier:
+        d, depth = frontier.pop(0)
+        yield d
+        if depth >= max_depth or time.time() - t0 > budget_s:
+            continue
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        if not e.is_dir(follow_symlinks=False) or e.name in SKIP_WALK:
+                            continue
+                        if e.name.startswith(".") and e.name not in AGENT_MARKERS:
+                            continue
+                        frontier.append((Path(e.path), depth + 1))
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+
+def looks_like_home(d):
+    d = Path(d)
+    try:
+        return any((d / m).exists() for m in AGENT_MARKERS)
+    except OSError:
+        return False
+
+
+def _is_skills_root(d):
+    try:
+        return any(c.is_dir() and (c / "SKILL.md").is_file() for c in Path(d).iterdir())
+    except OSError:
+        return False
+
+
+def find_on_volume(vol, max_depth=WALK_DEPTH, budget_s=WALK_BUDGET_S):
+    """→ (homes, skill_roots) found on a drive: dirs that look like a home (contain .claude/.codex/…) and stray
+    skill folders (any dir with child/SKILL.md) that aren't already inside one of those homes."""
+    vol = Path(vol)
+    homes, roots = [], []
+    for d in _walk(vol, max_depth, budget_s):
+        if looks_like_home(d):
+            homes.append(d)
+        elif _is_skills_root(d):
+            roots.append(d)
+    roots = [r for r in roots if not any(_same_or_under(r, h) for h in homes)]   # a home's own skills are scanned as that agent's
+    return homes, roots
 
 
 # ---- item model --------------------------------------------------------------
@@ -296,7 +454,7 @@ def _codex_items(path, cfg):
     return items
 
 
-def _claude_settings_items(path, cfg):
+def _claude_settings_items(path, cfg, agent="Claude Code"):
     items = []
     data = _json(path) or {}
     perms = data.get("permissions") or {}
@@ -305,21 +463,21 @@ def _claude_settings_items(path, cfg):
         if m:
             pfx = re.sub(r"[:\s]\*$", "", m.group(1)).strip()
             if pfx and pfx != "*":
-                items.append(Item("allow", pfx, "Claude Code", pfx, "auto-approve bash prefix",
+                items.append(Item("allow", pfx, agent, pfx, "auto-approve bash prefix",
                                   dup=pfx in cfg.get("bash_allow", []), src=path))
     for rule in perms.get("deny", []) or []:
         m = re.match(r"Bash\((.+)\)", str(rule))
         if m:
             pfx = re.sub(r"[:\s]\*$", "", m.group(1)).strip()
             if pfx:
-                items.append(Item("deny", pfx, "Claude Code", pfx, "always refuse", dup=pfx in cfg.get("bash_deny", []), src=path))
+                items.append(Item("deny", pfx, agent, pfx, "always refuse", dup=pfx in cfg.get("bash_deny", []), src=path))
     hooks = data.get("hooks")
     if isinstance(hooks, dict) and hooks:
         n = sum(len(v) for v in hooks.values() if isinstance(v, list))
-        items.append(Item("hook", f"{n} hook group(s)", "Claude Code", hooks, "lifecycle hooks (format compatible)",
+        items.append(Item("hook", f"{n} hook group(s)", agent, hooks, "lifecycle hooks (format compatible)",
                           dup=bool(cfg.get("hooks")), src=path))
     for name, spec in mcp_from_obj(data).items():
-        items.append(Item("mcp", name, "Claude Code", spec, spec.get("command") or spec.get("url", ""),
+        items.append(Item("mcp", name, agent, spec, spec.get("command") or spec.get("url", ""),
                           dup=name in cfg.get("mcp_servers", {}), src=path))
     return items
 
@@ -347,12 +505,18 @@ def _rules_dir_items(agent, d, cwd):
     return items[:40]
 
 
-def _skill_items(agent, root, existing):
+def _skill_items(agent, root, existing, only=None):
     items = []
     root = Path(root)
-    if GLOBAL_SKILLS_DIR.resolve() == root.resolve():
+    try:
+        if GLOBAL_SKILLS_DIR.resolve() == root.resolve():
+            return items
+        children = sorted(root.iterdir())
+    except OSError:
         return items
-    for d in sorted(root.iterdir()):
+    for d in children:
+        if only is not None and d.resolve() != Path(only).resolve():
+            continue
         f = d / "SKILL.md"
         if d.is_dir() and f.exists():
             meta = parse_frontmatter(_read(f))
@@ -498,12 +662,68 @@ def _aider_items(path):
 
 # ---- scan --------------------------------------------------------------------
 
-def scan(cfg, cwd=None):
+def classify_path(p):
+    """What is this folder someone pointed us at? skill · skills_root · home · project"""
+    p = Path(p)
+    if (p / "SKILL.md").is_file():
+        return "skill"
+    if looks_like_home(p):
+        return "home"
+    if _is_skills_root(p):
+        return "skills_root"
+    return "project"
+
+
+def scan(cfg, cwd=None, paths=(), volumes=()):
+    """Everything importable. paths: folders the user named (a skill, a skills folder, a copied ~/.claude,
+    a project). volumes: other drives to search (see external_volumes / find_on_volume)."""
     cwd = Path(cwd or Path.cwd()).resolve()
     existing_skills = set(discover_skills(cwd))
+    homes = [(HOME, "")]
+    skill_roots = []          # (agent_label, root_dir, only_this_child_or_None)
+    extra_projects = []       # (project_dir, tag)
+    for vol in volumes or ():
+        tag = f" @ {volume_label(vol)}"
+        try:
+            vh, vr = find_on_volume(vol)
+        except Exception:
+            continue
+        homes += [(h, tag) for h in vh]
+        skill_roots += [(f"skills folder{tag}", r, None) for r in vr]
+    for raw in paths or ():
+        p = Path(str(raw)).expanduser()
+        try:
+            if not p.exists():
+                continue
+            p = p.resolve()
+        except OSError:
+            continue
+        tag = f" @ {p.name or volume_label(p)}"
+        what = classify_path(p)
+        if what == "skill":
+            skill_roots.append((f"folder{tag}", p.parent, p))
+        elif what == "home":
+            homes.append((p, tag))
+        elif what == "skills_root":
+            skill_roots.append((f"folder{tag}", p, None))
+        else:
+            extra_projects.append((p, tag))
+            try:                                    # a plain folder: look inside it (bounded) for homes and skill folders
+                ph, pr = find_on_volume(p, max_depth=3, budget_s=3.0)
+            except Exception:
+                ph, pr = [], []
+            homes += [(h, tag) for h in ph if h.resolve() != p]
+            skill_roots += [(f"folder{tag}", r, None) for r in pr]
     items = []
     seen_src = set()
-    for agent, kind, path in sources(cwd):
+    src = sources(cwd, homes=homes)
+    for proj, tag in extra_projects:
+        def _add(agent, kind, p):
+            p = Path(p)
+            if p.exists():
+                src.append((agent, kind, p))
+        _project_sources(_add, proj, tag)
+    for agent, kind, path in src:
         key = (kind, str(path))
         if key in seen_src:
             continue
@@ -523,8 +743,8 @@ def scan(cfg, cwd=None):
                 for name, spec in mcp_from_obj(_json(path)).items():
                     items.append(Item("mcp", name, agent, spec, spec.get("command") or spec.get("url", ""),
                                       dup=name in cfg.get("mcp_servers", {}), src=path))
-            elif kind == "settings_json" and agent == "Claude Code":
-                items += _claude_settings_items(path, cfg)
+            elif kind == "settings_json" and agent.startswith("Claude Code"):
+                items += _claude_settings_items(path, cfg, agent)
             elif kind == "settings_json":
                 for name, spec in mcp_from_obj(_json(path)).items():
                     items.append(Item("mcp", name, agent, spec, spec.get("command") or spec.get("url", ""),
@@ -541,10 +761,19 @@ def scan(cfg, cwd=None):
                 items += _aider_items(path)
         except Exception:
             continue
-    # dedupe by (kind, name) keeping first
+    for agent, root, only in skill_roots:                 # stray skill folders from other drives / named paths
+        key = ("skills_root", str(root), str(only or ""))
+        if key in seen_src:
+            continue
+        seen_src.add(key)
+        try:
+            items += _skill_items(agent, root, existing_skills, only=only)
+        except Exception:
+            continue
+    # dedupe by (kind, name) keeping first — skills from different places keep their source so you can see both
     out, seen = [], set()
     for it in items:
-        k = (it.kind, it.name, it.src if it.kind == "memory" else "")
+        k = (it.kind, it.name, it.src if it.kind in ("memory", "skill") else "")
         if k in seen:
             continue
         seen.add(k)

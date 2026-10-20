@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""A scriptable fake OpenAI-compatible server for testing CHODE's agent loop.
+"""A scriptable fake OpenAI-compatible server for testing CHODE's agent loop and lifeline.
 
 Run standalone:   python tests/mock_server.py [port]      (default 8080)
-Use in tests:     with MockLLM(script) as m: ...  → m.url  (see test_agent.py)
+Use in tests:     with MockLLM(script) as m: ...  → m.url  (see test_agent.py / test_lifeline.py)
 
-A "script" is a list of turns; each turn is either a string (plain assistant
-text) or a dict {"content": str, "tool_calls": [{"name":..., "arguments": {...}}]}.
-Both streaming (SSE) and non-streaming requests are supported; every request
-body is recorded in `.requests`.
+A "script" is a list of turns; each turn is either a string (plain assistant text) or a dict
+{"content": str, "tool_calls": [{"name":..., "arguments": {...}}]}.
+
+Knobs:
+  stream_ok=False       answer stream requests with plain JSON (servers that ignore `stream`)
+  fail_with=[401, 503]  HTTP codes to return for the first N chat requests (then behave normally)
+  valid_models={...}    404 (OpenAI-style error body) for any other model name
+  models=[...]          what GET /models advertises (default mock-1, mock-2)
+  retry_after=2         Retry-After header on 429/503 answers
+Also serves GET /api/tags (Ollama shape) and POST /embeddings. Every request body is in `.requests`.
 """
 import json
 import sys
@@ -22,15 +28,22 @@ DEFAULT_SCRIPT = [
 
 
 class MockLLM:
-    def __init__(self, script=None, port=0, stream_ok=True):
+    def __init__(self, script=None, port=0, stream_ok=True, fail_with=None, valid_models=None, models=None,
+                 retry_after=None, reject_params=None):
         self.script = list(script or DEFAULT_SCRIPT)
         self.requests = []
         self.turn = 0
         self.stream_ok = stream_ok
+        self.fail_with = list(fail_with or [])
+        self.reject_params = dict(reject_params or {})   # {"temperature": "`temperature` is deprecated for this model."}
+        self.valid_models = set(valid_models) if valid_models else None
+        self.models = list(models or ["mock-1", "mock-2"])
+        self.retry_after = retry_after
         self.lock = threading.Lock()
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), self._handler())
         self.port = self.httpd.server_address[1]
         self.url = f"http://127.0.0.1:{self.port}/v1"
+        self.root = f"http://127.0.0.1:{self.port}"
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
 
     def __enter__(self):
@@ -43,10 +56,7 @@ class MockLLM:
 
     def _next(self):
         with self.lock:
-            if self.turn < len(self.script):
-                t = self.script[self.turn]
-            else:
-                t = "Nothing more to do."
+            t = self.script[self.turn] if self.turn < len(self.script) else "Nothing more to do."
             self.turn += 1
         if isinstance(t, str):
             t = {"content": t, "tool_calls": []}
@@ -59,17 +69,21 @@ class MockLLM:
             def log_message(self, *a):
                 pass
 
-            def _json(self, code, obj):
+            def _json(self, code, obj, headers=None):
                 out = json.dumps(obj).encode()
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(out)))
+                for k, v in (headers or {}).items():
+                    self.send_header(k, str(v))
                 self.end_headers()
                 self.wfile.write(out)
 
             def do_GET(self):
                 if self.path.endswith("/models"):
-                    return self._json(200, {"data": [{"id": "mock-1"}, {"id": "mock-2"}]})
+                    return self._json(200, {"data": [{"id": m} for m in mock.models]})
+                if self.path.endswith("/api/tags"):
+                    return self._json(200, {"models": [{"name": m} for m in mock.models]})
                 self._json(404, {"error": "nope"})
 
             def do_POST(self):
@@ -78,6 +92,19 @@ class MockLLM:
                 if self.path.endswith("/embeddings"):
                     inputs = body.get("input") or []
                     return self._json(200, {"data": [{"index": i, "embedding": [float(len(t) % 7), 1.0, 0.5]} for i, t in enumerate(inputs)]})
+                with mock.lock:
+                    code = mock.fail_with.pop(0) if mock.fail_with else None
+                if code:
+                    msgs = {401: "Incorrect API key provided", 403: "forbidden", 404: "The model does not exist",
+                            429: "Rate limit reached", 500: "internal error", 503: "overloaded"}
+                    hdrs = {"Retry-After": mock.retry_after} if mock.retry_after and code in (429, 503) else None
+                    return self._json(code, {"error": {"message": msgs.get(code, "error"), "type": "mock_error", "code": code}}, hdrs)
+                for param, msg in mock.reject_params.items():
+                    if param in body:
+                        return self._json(400, {"type": "error", "error": {"type": "invalid_request_error", "message": msg}})
+                if mock.valid_models is not None and body.get("model") not in mock.valid_models:
+                    return self._json(404, {"error": {"message": f"The model `{body.get('model')}` does not exist or you do not have access to it.",
+                                                      "type": "invalid_request_error", "code": "model_not_found"}})
                 turn = mock._next()
                 tcs = [{"id": f"call_{i}", "type": "function",
                         "function": {"name": tc["name"], "arguments": json.dumps(tc["arguments"])}}

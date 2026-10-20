@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(git tag:*)",
+      "Bash(git merge:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh release:*)",
+      "Bash(gh api:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m build:*)",
+      "Bash(pip install:*)"
+    ]
+  }
+}

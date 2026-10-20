@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/chchchadzilla/chode/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/chchchadzilla/chode?style=flat-square&color=ff3fb3&label=release"></a>
-  <img alt="tests" src="https://img.shields.io/badge/tests-60%20passing%20offline-3dff8f?style=flat-square">
+  <img alt="tests" src="https://img.shields.io/badge/tests-86%20passing%20offline-3dff8f?style=flat-square">
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-2ee6ff?style=flat-square"></a>
   <img alt="python" src="https://img.shields.io/badge/python-3.9%2B-2ee6ff?style=flat-square">
   <img alt="deps" src="https://img.shields.io/badge/dependencies-1%20(requests)-2ee6ff?style=flat-square">
@@ -99,10 +99,25 @@ That's it. That's the whole tutorial. CHODE will make a folder, write the files,
 
 ---
 
+## It always works (the lifeline)
+
+No API key? Wrong model name? Provider down? Out of free credits? CHODE does not show you a stack trace and quit.
+
+- **Zero-key start.** `chode setup` → *"Just make it work (free)"* picks whatever can answer on your machine right now: a local Ollama model if you have one, else a free keyless model. *"Free key, 2 minutes"* opens Gemini/Groq/OpenRouter/Mistral's key page for you and only asks you to paste it.
+- **Retries that make sense.** Network blips, rate limits and server errors get backoff and `Retry-After`; bad keys and unknown models don't waste your time retrying.
+- **Model names fix themselves.** Typed `anthropic/opus-5.5`, `Opus 5.5` or `gpt5 mini`? CHODE normalizes what humans type into what the API wants (`claude-opus-5-5`, `gpt-5-mini`), then checks it against the provider's **live model list** the moment you set it (`/model`, `/provider`, the wizard, `chode --model`) and tells you what it changed. Typos resolve to the closest real id; `sonnet` / `opus` / `haiku` always mean "the newest you have".
+- **Settings a model won't take get dropped, not fatal.** Claude 4.7+/5.x reject `temperature`; OpenAI's reasoning models reject it too; OpenRouter and Ollama models happily take `temperature`/`top_p`/`top_k`. CHODE knows the known cases, learns the rest live from the 400, retries without the setting, and **remembers it per model**. `/sampling` shows exactly what's sent to the current model and lets you set temperature / top_p / top_k globally, per provider, or per model.
+- **A fallback ladder.** When a provider is truly dead for the session, CHODE walks: your other keys → local servers that are actually running → a free keyless model. It tells you every switch and never changes your saved default unless you say `/provider keep`.
+- **Every error comes with the whole answer.** Not a tip. A block that says *what happened* in plain English, *what CHODE already did*, *do this now* (specific to the error: the exact keys page and env var for a bad key, the corrected name for a wrong model, the setting to flip for a rejected parameter, the command to start Ollama), *three free ways to be coding in two minutes*, and the one command that does it for you.
+- **`chode fix`** — the connection doctor. A tiny agent runs on whatever model *does* answer, lists models, reads the provider docs, switches provider or model, tests, and tells you in three lines what it changed. It can set provider/model/URLs/sampling; it can never see or set API keys.
+
+Details: [docs/lifeline.md](docs/lifeline.md).
+
 ## What makes it thicc
 
 | | feature | what it means for you |
 |---|---|---|
+| 🪢 | **Lifeline** | Retries, error hints, model-name auto-correction, a fallback ladder that ends in a free model, and `chode fix` to repair the config for you. You are never stuck at "can't connect". |
 | 💳 | **Plan Bridge** | Use your Claude Max / ChatGPT Pro / Gemini Ultra subscription as CHODE's brain. CHODE drives the official CLI and mounts *itself* as an MCP server, so the vendor's model thinks on your plan and acts through CHODE's tools, memory and safety rails. `chode ride claude` does the reverse: their TUI, with CHODE's gear inside. |
 | 🥤 | **The Gulp** (`chode import`) | One-click import from 20+ coding agents: rules → memory, SKILL.md → skills, commands/prompts → slash commands, agents → sub-agent personas, mcpServers → MCP, permissions → allow/deny lists, hooks → hooks (Claude Code's hook format just works). |
 | 📐 | **ORDER** | **O**rganize · **R**ecord · **D**ocument · **E**xport · **R**elease. Audits every repo for README / ABOUT.md / LICENSE / CHANGELOG / tests / CI / secrets / tidiness, scores it 0–100 ("flat" → "tuna can"), scaffolds the boring parts, and has the model write the parts that need taste — including `ABOUT.md` with the origin story, marketing copy, 3 tweets, a LinkedIn post, a Reddit post and a Show HN line. |
@@ -138,13 +153,15 @@ you › #we deploy from the release branch, never main    ← saved to CHODE.md
 |---|---|
 | `/help` | all of them |
 | `/mode plan\|ask\|edits\|yolo` | how much CHODE may do without asking |
-| `/model`, `/models`, `/provider` | switch brains mid-conversation |
+| `/model`, `/models`, `/provider` | switch brains mid-conversation (names are normalized and checked against the live list) |
+| `/sampling [edit]` | see what's sent to this model; set temperature / top_p / top_k globally, per provider or per model |
 | `/order` · `/about` · `/status` · `/tidy` · `/backup` | ORDER |
 | `/ship [message]` · `/release v1.2.3` · `/banner` | publish |
 | `/remember <text>` · `/memories` · `/forget <id>` · `/memory` · `/init` | memory |
 | `/conscience` · `/ledger` | the mindful bits |
 | `/search <q>` · `/index` | local RAG |
-| `/import` · `/plans` · `/ride claude\|codex\|gemini` | friction removal |
+| `/import [folder…] [--drives]` · `/plans` · `/ride claude\|codex\|gemini` | friction removal |
+| `/fix` · `/lifeline` · `/provider keep` | repair the model connection · see the fallback ladder · keep a fallback as default |
 | `/gui` | open the Deck |
 | `/undo` · `/diff` · `/git` · `/cost` · `/compact` · `/resume` · `/export` | session |
 | `/skills` · `/agents` · `/mcp` · `/hooks` · `/permissions` · `/config` | gear |
@@ -157,11 +174,13 @@ Every markdown file in `~/.chode/commands/` (or `.chode/commands/`, or `.claude/
 chode                      menu            chode setup             wizard
 chode -p "fix the tests"   one-shot        chode "fix the tests"   same thing
 chode -c                   continue        chode gui               the Deck
-chode import               the gulp        chode plans             detect subscriptions
+chode import [--drives]    the gulp        chode plans             detect subscriptions
+chode import D:\\old ~/usb  import from any folder / drive         chode sampling [edit]   temperature · top_p · top_k
 chode ride claude          handoff         chode order [fix]       audit / scaffold
 chode backup [list|restore N]              chode index · chode search <q>
 chode ship [msg] · chode release vX.Y.Z    chode banner [name]
 chode doctor · chode health                chode mcp-serve         CHODE as an MCP server
+chode fix                  connection doctor      chode lifeline          what can answer here
 chode skills · chode memory · chode ledger · chode conscience
 ```
 
@@ -180,10 +199,12 @@ chode skills · chode memory · chode ledger · chode conscience
 | `gemini` | `GEMINI_API_KEY` | Google Gemini |
 | `xai` | `XAI_API_KEY` | Grok |
 | `openrouter` | `OPENROUTER_API_KEY` | hundreds of models, some **free** |
-| `deepseek`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`, `perplexity`, `azure` | their key | cheap / fast / specialized |
+| `groq`, `mistral`, `cerebras`, `huggingface` | a **free-tier** key (2-minute signup, no card) | fast / cheap; the wizard opens the signup page |
+| `deepseek`, `together`, `moonshot`, `perplexity`, `azure` | their key | cheap / specialized |
 | `ollama`, `lmstudio`, `local` | nothing | **free, offline**, any OpenAI-compatible server |
+| `pollinations` | nothing — no key, no signup | **free**, community-run, rate-limited; the last rung of the lifeline |
 
-Switch any time: `/provider openrouter qwen/qwen3-coder:free`.
+Switch any time: `/provider openrouter qwen/qwen3-coder:free`. See what can answer on your machine: `chode lifeline`.
 
 > Grok: xAI doesn't ship an agent CLI with subscription login yet, so Grok rides on an API key (`xai`). The moment one exists, point `plans.custom.command` at it.
 
@@ -212,6 +233,12 @@ chode import
 ```
 
 CHODE scans the places other agents keep their stuff and shows you a numbered list. Pick `all`, `new`, or `1,3-5`.
+
+Your stuff lives somewhere else? **Other drives:** `chode import --drives` (or say yes when it asks) looks on every other
+mounted drive (`D:`, `E:`, `/Volumes/*`, `/media/*`, `/mnt/*`, WSL's `/mnt/c`) for agent folders (`.claude`, `.codex`, `.cursor`…
+under any `Users/<name>`) and loose folders of `SKILL.md` skills. It's bounded (a few seconds per drive, never inside `Windows/`,
+`Program Files/`, `node_modules/`…). **Any folder:** `chode import D:\old-laptop ~/usb/my-skills` takes a single skill, a
+skills folder, a copied `~/.claude`, or a project. Inside a session: `/import --drives`, `/import <folder>`.
 
 | from | what it finds | becomes |
 |---|---|---|
@@ -302,7 +329,12 @@ Mechanically:
 |---|---|
 | `python: command not found` / `not recognized` | Install Python (step 1). On Windows, re-run the installer and tick "Add python.exe to PATH". Close and reopen the terminal. |
 | `chode: command not found` | `python -m chode`. Or add `~/.local/bin` (mac/linux) / `%APPDATA%\Python\Scripts` (windows) to your PATH. |
-| `no API key for anthropic` | `chode setup` → pick a plan, paste a key, or choose local. |
+| `no API key for anthropic` | `chode setup` → *Just make it work (free)*, or paste a key, or choose local. CHODE also falls back on its own at startup. |
+| `the model didn't answer — [not_found] …` | CHODE auto-corrects model names when it can; otherwise `/models` then `/model <name>`, or just `/fix`. Vendor ids are odd: Anthropic's is `claude-opus-5-5`, not `anthropic/opus-5.5` — type whatever, CHODE normalizes it and checks the live list. |
+| `` `temperature` is deprecated for this model `` (HTTP 400) | Claude 4.7+/5.x don't take sampling settings. CHODE drops it, retries and remembers that for the model — just try again. `/sampling` shows what's sent; models that *do* take it (OpenRouter, Ollama…) still get it. |
+| it keeps saying `rate_limit` | you're out of free quota on that provider. `/lifeline` shows what else can answer; `/fix` switches for you. |
+| any connection failure | you get a full "what happened / what CHODE did / do this now / free ways out" block, specific to the error. Follow step 1. Or `chode fix`. |
+| my skills are on another drive | `chode import --drives`, or `chode import <that folder>`. |
 | `claude CLI not found` | `npm i -g @anthropic-ai/claude-code && claude login` (Codex: `npm i -g @openai/codex`; Gemini: `npm i -g @google/gemini-cli`). |
 | `Could not connect to http://localhost:11434` | Start Ollama (`ollama serve`) and pull a model (`ollama pull qwen3-coder`). |
 | the intro animation looks broken | your terminal is under 76 columns or doesn't do ANSI; `chode --no-intro` or `/config intro false`. |

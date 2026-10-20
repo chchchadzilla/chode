@@ -223,13 +223,84 @@ judgment and taste.
 """
 
 
+CONNECTION_DOCTOR_MD = """---
+name: connection-doctor
+description: Fix "can't connect to the model" problems — wrong model name, bad or missing API key, dead local server, rate limits — by listing models, reading the provider's docs, switching provider, and testing until something answers
+---
+# Connection doctor
+
+Use this when the user says CHODE can't reach its model, a model name was rejected, a key fails,
+or they "can't figure out which model to pick". The goal is a WORKING provider+model, verified by
+`test_connection`, in as few steps as possible. Be kind; assume the user is new.
+
+## Procedure
+1. `test_connection` with no arguments. If it says OK, you're done — explain what works.
+2. Read the error kind:
+   - **not_found** → `list_models` for that provider. Pick the closest name (prefer the newest version and models that
+     support tool calling), `set_config model <name>`, test again. If the list is empty or odd, `web_fetch` the docs URL
+     for that provider (below) and read the model names from there.
+   - **auth** → the key is missing or wrong. Do NOT ask the user to paste a key into chat. Say exactly which env var or
+     `chode setup` step fixes it, then switch to a provider that already works (a local server, another key, or the
+     keyless `pollinations` rung) so they can keep working: `set_config provider <name>` → `test_connection`.
+   - **network** → for ollama/lmstudio/local: say how to start the server (`ollama serve`, `ollama pull qwen2.5-coder:7b`).
+     You may run `ollama list` / `ollama pull <small model>` via bash if ollama is installed. For cloud providers:
+     proxy/VPN/base URL; verify with `list_models`.
+   - **rate_limit** → explain the quota in one line and fall back to another provider for now.
+   - **bad_request** → read the message. If it names a request setting (`temperature`, `top_p`, `top_k`, `max_tokens`),
+     CHODE already drops it for that model and remembers that — just `test_connection` again; you can also
+     `set_config sampling.temperature default`. Otherwise it's usually a model without tool-calling support, or a wrong
+     base URL: pick a different model / fix `base_urls.<provider>`.
+   - A model name like `anthropic/opus-5.5` or `Opus 5.5` is a human spelling: `set_config model <name>` normalizes it
+     (→ `claude-opus-5-5`) and checks it against the live list; read what it returns.
+3. Prefer free when switching: a running Ollama model → `pollinations` (keyless) → a free-tier key the user already has.
+4. After every change run `test_connection`. Stop at the first OK.
+5. Finish with three short lines: what works now, what was wrong, how to upgrade later (`chode setup`).
+
+## Docs by provider (fetch with web_fetch when the model list isn't enough)
+- anthropic: https://docs.anthropic.com/en/docs/about-claude/models/overview
+- openai: https://platform.openai.com/docs/models
+- gemini: https://ai.google.dev/gemini-api/docs/models
+- xai: https://docs.x.ai/docs/models
+- groq: https://console.groq.com/docs/models
+- openrouter (free models): https://openrouter.ai/models?q=free
+- mistral: https://docs.mistral.ai/getting-started/models/models_overview/
+- deepseek: https://api-docs.deepseek.com/quick_start/pricing
+- cerebras: https://inference-docs.cerebras.ai/models/overview
+- ollama (tool-capable models): https://ollama.com/search?c=tools
+- pollinations: https://github.com/pollinations/pollinations/blob/master/APIDOCS.md
+
+## Rules
+- Never read, print or ask for API keys. Never change anything except provider / model / base_urls / fallbacks / sampling.*.
+- Never run shell commands other than `ollama list`, `ollama ps`, `ollama pull <model>`.
+- Fewer words, more `test_connection`.
+"""
+
+
 def ensure_builtin_skills():
-    for name, text in (("skill-porter", SKILL_PORTER_MD), ("repo-order", REPO_ORDER_MD)):
+    """Install the built-in skills; refresh one when CHODE's bundled text changed and the user hasn't edited it
+    (a `.builtin` sidecar holds the hash of what CHODE last wrote)."""
+    import hashlib
+    for name, text in (("skill-porter", SKILL_PORTER_MD), ("repo-order", REPO_ORDER_MD),
+                       ("connection-doctor", CONNECTION_DOCTOR_MD)):
         try:
             dest = GLOBAL_SKILLS_DIR / name
-            if not dest.exists():
-                dest.mkdir(parents=True, exist_ok=True)
-                (dest / "SKILL.md").write_text(text.replace("{SKILLS_DIR}", str(GLOBAL_SKILLS_DIR)),
-                                               encoding="utf-8")
+            body = text.replace("{SKILLS_DIR}", str(GLOBAL_SKILLS_DIR))
+            digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            skill_file, sidecar = dest / "SKILL.md", dest / ".builtin"
+            if skill_file.exists():
+                current = skill_file.read_text(encoding="utf-8", errors="replace")
+                if current == body:
+                    if not sidecar.exists():
+                        sidecar.write_text(digest, encoding="utf-8")
+                    continue
+                last_written = sidecar.read_text(encoding="utf-8").strip() if sidecar.exists() else None
+                user_edited = last_written is not None and hashlib.sha256(current.encode("utf-8")).hexdigest() != last_written
+                # pre-1.0.2 installs have no sidecar: treat our own unedited 1.0.1 doctor text as refreshable
+                legacy_ours = last_written is None and name == "connection-doctor" and "# Connection doctor" in current and "sampling" not in current
+                if user_edited or (last_written is None and not legacy_ours):
+                    continue
+            dest.mkdir(parents=True, exist_ok=True)
+            skill_file.write_text(body, encoding="utf-8")
+            sidecar.write_text(digest, encoding="utf-8")
         except Exception:
             pass

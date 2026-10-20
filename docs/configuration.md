@@ -9,8 +9,11 @@ Set `CHODE_HOME` to relocate `~/.chode` (tests do this).
 | key | default | meaning |
 |---|---|---|
 | `provider` | `anthropic` | see README providers table; `*-plan` providers use the vendor CLI |
-| `model` | `""` | empty = provider default; Anthropic aliases `opus`/`sonnet`/`haiku`/`fable` |
-| `max_tokens` / `temperature` | 8192 / 0.2 | |
+| `model` | `""` | empty = provider default; Anthropic aliases `opus`/`sonnet`/`haiku`/`fable`. Human spellings are normalized on load and when set (`anthropic/opus-5.5` → `claude-opus-5-5`) and checked against the live model list (see [lifeline.md](lifeline.md)) |
+| `max_tokens` | 8192 | longest answer requested |
+| `sampling` | `{"temperature": 0.2, "top_p": null, "top_k": null, "overrides": {}}` | `null` = don't send. `overrides` keyed by provider, `provider/model` or model id. `/sampling` edits it. See [sampling.md](sampling.md) |
+| `temperature` | 0.2 | legacy; feeds `sampling.temperature` when the config has no `sampling` block |
+| `param_quirks` | `{}` | `{"<model>": ["temperature"]}` — settings a model rejected with a 400, learned live and never sent again; `/sampling forget` clears |
 | `stream` | true | stream tokens (falls back automatically if a server ignores it) |
 | `base_urls.<provider>` | | override endpoint (Azure needs the deployment URL) |
 | `api_keys.<provider>` | | keys (env vars take priority); file is chmod 600 |
@@ -43,6 +46,9 @@ Set `CHODE_HOME` to relocate `~/.chode` (tests do this).
 | `gui.port` / `gui.open_browser` | 7331 / true | |
 | `banner.image_provider` | `auto` | `openai` / `gemini` / `xai` / `auto` |
 | `agents.subagent_model` / `agents.max_depth` | `""` / 2 | |
+| `fallbacks` | `"auto"` | lifeline ladder: `"auto"`, a list of `"provider"` / `"provider:model"`, or `false` (see [lifeline.md](lifeline.md)) |
+| `retries` | 3 | per-request retries for network errors / 429 / 5xx (exponential backoff, Retry-After honored) |
+| `last_known_good` | `{}` | written automatically when a provider answers; tried first when the default can't |
 
 ## Environment variables
 

@@ -46,6 +46,10 @@ class Repl:
     def boot(self, cont=False, quiet=False):
         ensure_home()
         a = self.app
+        # lifeline: never start with a provider that can't possibly answer
+        from . import lifeline
+        lifeline.ensure_usable(self.cfg, notify=lambda m, lvl="warn": self.ui.notice("  🪢 " + m, lvl))
+        self.client.on_fallback = lambda note: self.ui.notice("  🪢 " + note, "warn")
         if cont:
             sessions = SessionStore.list_sessions()
             if sessions:
@@ -84,7 +88,9 @@ class Repl:
     def banner(self):
         cfg, client = self.cfg, self.client
         mode_icon = MODE_ICONS[cfg["mode"]]
-        print(f"  {dim('v' + VERSION)}   provider: {bold(client.provider)}   model: {bold(client.model)}   mode: {bold(cfg['mode'])} {mode_icon}")
+        model_label = client.model or "(server default)"
+        print(f"  {dim('v' + VERSION)}   provider: {bold(client.provider)}   model: {bold(model_label)}   mode: {bold(cfg['mode'])} {mode_icon}"
+              + (dim("   (session fallback — /provider keep to make it default)") if cfg.get("_fallback_from") else ""))
         print(f"  {dim('cwd:')} {os.getcwd()}")
         extras = []
         if instructions_block():
@@ -130,7 +136,9 @@ class Repl:
         try:
             run_agent(self.client, self.perms, self.system_ref[0], self.history, ui=self.ui)
         except LLMError as e:
-            self.ui.notice(f"\nerror: {e}", "error")
+            from . import lifeline
+            self.ui.notice(f"\n🪢 the model didn't answer — [{e.kind}] {str(e)[:300]}", "error")
+            self.ui.notice("\n" + lifeline.what_now(self.cfg, e, in_session=True), "warn")
             if self.history and self.history[-1]["role"] == "user":
                 self.history.pop()
         except KeyboardInterrupt:
@@ -318,6 +326,11 @@ def start_chat(cfg, args, cont=False, oneshot=None):
     if oneshot:
         repl.app.oneshot = True
         repl.ui.quiet = True
+        if not sys.stdin.isatty():
+            # nobody can answer a permission prompt → deny unsafe actions instead of hanging forever
+            repl.ui.interactive = False
+            if cfg["mode"] in ("ask", "edits"):
+                repl.ui.notice(f"  (non-interactive: actions that need approval are denied in mode '{cfg['mode']}' — use --mode yolo or --mode edits)", "dim")
         repl.boot(cont=cont or getattr(args, "cont", False), quiet=True)
         try:
             repl.run_turn(oneshot)

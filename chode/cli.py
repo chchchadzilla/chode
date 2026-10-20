@@ -12,13 +12,15 @@ from .ui import bold, collision_intro, dim, red, set_theme, static_banner, yesno
 
 COMMANDS = ("chat", "menu", "setup", "doctor", "health", "import", "migrate", "plans", "ride", "order", "backup",
             "index", "search", "banner", "ship", "release", "gui", "mcp-serve", "skills", "memory", "ledger",
-            "conscience", "about", "version")
+            "conscience", "about", "version", "fix", "lifeline", "sampling", "tune")
 
 EPILOG = f"""commands:
   chat            talk to CHODE (default when piping or with -p)
   menu            the launcher (default on a terminal)
   setup           guided config: plan or key, model, mode, ORDER options
   import          one-click import of skills/rules/commands/MCP/hooks from every other coding agent
+                  (add --drives to scan external/other drives, or give folders: chode import D:\\stuff ~/old-skills)
+  sampling        view/edit temperature · top_p · top_k globally, per provider or per model (`chode sampling edit`)
   plans           detect Claude/Codex/Gemini CLIs and ride your subscription
   ride <cli>      open claude|codex|gemini with CHODE's tools + memory mounted
   order [fix]     audit this repo's ORDER; `fix` scaffolds + has the model write README/ABOUT/tests
@@ -29,6 +31,8 @@ EPILOG = f"""commands:
   release vX.Y.Z  bump, changelog, tag, push, GitHub release
   gui             the Deck — same brain, in your browser
   mcp-serve       run CHODE as an MCP server (what the Plan Bridge uses)
+  fix             the connection doctor: finds a model that answers and fixes the config for you
+  lifeline        show what CHODE can fall back to on this machine (keys · local servers · free)
   skills [add|remove] · memory [export|clear] · ledger · conscience · doctor · health
 
 {TAGLINE}."""
@@ -105,7 +109,10 @@ def main(argv=None):
     ap.add_argument("--cwd", help="run in this directory")
     ap.add_argument("--port", type=int, help="gui port")
     ap.add_argument("--version", action="version", version=f"CHODE {VERSION}")
-    args = ap.parse_args(argv)
+    # sub-command flags (`chode import --drives`, `chode ship --no-push`, `chode index --full`, `chode order --json` …)
+    # belong to the command, not to argparse: keep them, don't die on them
+    args, unknown = ap.parse_known_args(argv)
+    args.cmd_args = list(args.cmd_args) + list(unknown)
 
     if args.cwd:
         os.chdir(args.cwd)
@@ -118,7 +125,8 @@ def main(argv=None):
         cfg["provider"] = args.provider
         cfg["model"] = ""
     if args.model:
-        cfg["model"] = args.model
+        from .config import normalize_model
+        cfg["model"] = normalize_model(cfg["provider"], args.model)
     if args.yolo:
         cfg["mode"] = "yolo"
     elif args.mode:
@@ -178,7 +186,16 @@ def main(argv=None):
         sys.exit(0 if run_health(cfg) else 1)
     elif cmd in ("import", "migrate"):
         from .wizard import run_import
-        run_import(cfg, auto_yes="--yes" in args.cmd_args or "-y" in args.cmd_args)
+        flags = [a for a in args.cmd_args if a.startswith("-")]
+        paths = [a for a in args.cmd_args if not a.startswith("-")]
+        drives = True if any(f in ("--drives", "--all-drives", "--external") for f in flags) else (False if "--no-drives" in flags else None)
+        run_import(cfg, auto_yes="--yes" in flags or "-y" in flags, paths=paths, drives=drives)
+    elif cmd in ("sampling", "tune"):
+        from . import sampling
+        from .llm import LLMClient
+        out = sampling.handle(cfg, LLMClient(cfg), args.cmd_args)
+        if out:
+            print(out)
     elif cmd == "plans":
         from .wizard import run_plans
         run_plans(cfg)
@@ -265,6 +282,24 @@ def main(argv=None):
         start_chat(cfg, args, oneshot=about_prompt_only(detect_project()))
     elif cmd == "version":
         print(f"CHODE {VERSION} — {TAGLINE}")
+    elif cmd == "fix":
+        from . import lifeline, state
+        from .ui import TerminalUI
+        ui = TerminalUI()
+        state.set_app(state.App(cfg, ui=ui))
+        print(bold("\n  🩹 CHODE connection doctor\n"))
+        for p, ok_, note in lifeline.status(cfg):
+            print(f"  {'✓' if ok_ else '·'} {p:<12} {dim(note)}")
+        print()
+        out = lifeline.run_fixer(cfg, ui=ui)
+        print("\n  " + (out or "").strip().replace("\n", "\n  ") + "\n")
+    elif cmd == "lifeline":
+        from . import lifeline
+        print(bold("\n  🪢 lifeline — what can answer on this machine\n"))
+        for p, ok_, note in lifeline.status(cfg):
+            print(f"  {'✓' if ok_ else '·'} {p:<12} {dim(note)}")
+        lad = lifeline.ladder(cfg)
+        print("\n  fallback order: " + (" → ".join(f"{p}{('/' + m) if m else ''}" for p, m in lad) if lad else "(fallbacks off)") + "\n")
 
 
 if __name__ == "__main__":

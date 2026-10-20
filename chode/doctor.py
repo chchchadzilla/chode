@@ -77,9 +77,15 @@ def run_doctor(cfg):
         except LLMError as e:
             bad(f"{provider} endpoint unreachable", str(e)[:140])
     if not client.model:
-        bad("no model set", "chode setup, or /model <name>")
+        warn("no model set — the server's default will be used", "/model <name> to pin one")
     else:
         ok(f"model: {client.model}")
+    from . import lifeline
+    lad = lifeline.ladder(cfg, exclude=(provider,))
+    if lad:
+        ok("lifeline: fallbacks available", " → ".join(f"{p}{('/' + m) if m else ''}" for p, m in lad[:5]))
+    else:
+        warn("lifeline: nothing to fall back to", "chode lifeline · a free key takes 2 minutes · or install ollama")
 
     for tool, why in (("git", "repo context, /ship, /release, skill installs"),
                       ("gh", "creates GitHub repos & releases (optional)"),

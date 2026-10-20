@@ -36,8 +36,11 @@ def _wizard(cfg):
     print()
     print(bold("  how should CHODE think?"))
     from .plans import detect_plans
+    from . import lifeline
     plans = [p for p in detect_plans() if p[2]]
-    options = [("API key", "pay per token — Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter…"),
+    options = [("Just make it work (free)", "CHODE picks whatever answers right now: a local model if you have one, else a free keyless model"),
+               ("Free key, 2 minutes", "Gemini / Groq / OpenRouter / Mistral / Cerebras free tiers — no card; CHODE opens the page"),
+               ("API key I already have", "pay per token — Anthropic, OpenAI, Gemini, xAI, DeepSeek, OpenRouter…"),
                ("Local & free", "Ollama / LM Studio / llama.cpp on this machine — no key, no bill")]
     if plans:
         options.insert(0, ("Subscription I already pay for", "detected: " + ", ".join(p[3].split(' — ')[0] for p in plans)))
@@ -45,7 +48,33 @@ def _wizard(cfg):
         options.append(("Subscription I already pay for", "none detected yet (install claude / codex / gemini CLI)"))
     pick = choose("pick one", options, default=1)
     label = options[pick][0]
-    if label.startswith("Subscription"):
+    if label.startswith("Just make it work"):
+        cands = lifeline.ladder(dict(cfg, provider="__none__", fallbacks="auto"), exclude=("__none__",))
+        if cands:
+            provider, model = cands[0]
+            cfg["provider"], cfg["model"] = provider, model or ""
+            ok(f"using {provider}{(' / ' + model) if model else ''}", PROVIDER_NOTES.get(provider, ""))
+            if provider == "pollinations":
+                print(dim("    it's free and keyless, so it's slower and rate-limited — perfect to start, upgrade any time with `chode setup`"))
+        else:
+            warn("nothing reachable right now", "falling back to the keyless free model; check your internet")
+            cfg["provider"], cfg["model"] = "pollinations", ""
+    elif label.startswith("Free key"):
+        opts = lifeline.free_key_options()
+        idx = choose("which free tier?", opts, default=1)
+        provider = opts[idx][0]
+        cfg["provider"] = provider
+        url = lifeline.open_signup(provider)
+        print(dim(f"    opened {url} in your browser — sign in, create a key, copy it"))
+        key = getpass.getpass(f"  paste the key here (hidden) › ").strip()
+        if key:
+            cfg.setdefault("api_keys", {})[provider] = key
+            ok("key stored in ~/.chode/config.json (chmod 600)")
+        else:
+            warn("no key pasted", f"set {PROVIDERS[provider][2]} later or run chode setup again")
+        cfg["model"] = ""
+        ok(f"model: {FREE_TIERS_MODEL(provider)}", "the free-tier default; /models to see others")
+    elif label.startswith("Subscription"):
         names = [p[0] for p in detect_plans()]
         notes = [(p[0], PROVIDER_NOTES[p[0]] + ("" if p[2] else f"  [not installed: {p[4]}]")) for p in detect_plans()]
         idx = choose("which plan?", notes, default=1)
@@ -54,6 +83,14 @@ def _wizard(cfg):
         ok("no API key needed — CHODE drives the CLI and your plan pays")
         cfg["model"] = input(f"  model alias (optional, e.g. opus/sonnet) [{cfg.get('model') or PROVIDERS[provider][3] or 'default'}] › ").strip() or cfg.get("model", "")
     elif label.startswith("Local"):
+        up, models = lifeline.ollama_running()
+        if lifeline.ollama_installed() and up and not models:
+            if yesno("ollama is running but has no models — pull a small free coding model now (~4 GB)?", True):
+                okp, msg = lifeline.ollama_pull(lifeline.OLLAMA_STARTERS[0], progress=lambda l: print("\r  " + l[:70], end=""))
+                print()
+                (ok if okp else bad)(msg)
+        elif not lifeline.ollama_installed():
+            print(dim("    tip: Ollama is the easiest free local option — https://ollama.com/download, then `ollama pull qwen2.5-coder:7b`"))
         names = ["ollama", "lmstudio", "local"]
         idx = choose("which?", [(n, PROVIDER_NOTES[n]) for n in names], default=1)
         provider = names[idx]
@@ -93,11 +130,31 @@ def _wizard(cfg):
     cfg.setdefault("publish", {})["autocommit"] = ["off", "turn", "session"][ac]
     cfg["redact_secrets"] = yesno("redact API-key-looking strings before sending tool output to the model?", cfg.get("redact_secrets", True))
 
+    # 4. optional: tune sampling (temperature / top_p / top_k) — most people never need to
+    if PROVIDERS[cfg["provider"]][0] != "plan" and yesno("tune sampling (temperature · top_p · top_k)? most people skip this", False):
+        from . import sampling
+        sampling.interactive(cfg, LLMClient(cfg))
+
     save_config(cfg)
     ok(f"saved to {CONFIG_FILE}")
+    worked = True
     if yesno("test the connection now?", True):
-        ping_test(cfg)
-    print(dim("  tip: run `chode import` to pull your skills/rules/MCP servers from Claude Code, Cursor, Codex, VS Code…\n"))
+        worked = ping_test(cfg)
+        if not worked and yesno("let CHODE try to fix it (connection doctor)?", True):
+            from . import lifeline
+            out = lifeline.run_fixer(cfg)
+            print("  " + (out or "").strip().replace("\n", "\n  "))
+            worked = ping_test(cfg, explain=False)
+    if worked:
+        print(dim("  tip: `chode import` pulls your skills/rules/MCP servers from Claude Code, Cursor, Codex, VS Code…"
+                  " (`chode import --drives` also looks on external drives)\n"))
+    else:
+        print(dim("  nothing saved is wrong — follow the steps above, or run `chode fix` whenever you like.\n"))
+
+
+def FREE_TIERS_MODEL(provider):
+    from .config import FREE_TIERS
+    return FREE_TIERS.get(provider, {}).get("model") or PROVIDERS[provider][3]
 
 
 def _base_url_step(cfg, provider):
@@ -113,8 +170,12 @@ def _base_url_step(cfg, provider):
 
 
 def _model_step(cfg, provider):
+    """Pick a model. Whatever gets typed is normalized ("anthropic/opus-5.5" → claude-opus-5-5) and checked
+    against the provider's live list, so a wrong name is corrected here instead of failing later."""
+    from . import lifeline
     default_model = PROVIDERS[provider][3]
     model = cfg.get("model") or default_model
+    models = None
     if yesno("fetch the model list from the provider?", default=provider in ("ollama", "lmstudio", "local")):
         try:
             with Spinner("fetching models"):
@@ -127,30 +188,45 @@ def _model_step(cfg, provider):
             elif raw:
                 model = raw
         except LLMError as e:
-            bad("could not fetch models", str(e)[:120])
+            bad("could not fetch models", f"[{e.kind}] {str(e)[:120]}")
+            if e.hint:
+                print(dim("    → " + e.hint[:200]))
             raw = input(f"  model name [{model}] › ").strip()
             model = raw or model
     else:
         raw = input(f"  model name [{model}] › ").strip()
         model = raw or model
+    if model and model != default_model:
+        with Spinner("checking the model name"):
+            new, note, verified = lifeline.verify_model(cfg, model, available=models)
+        if note:
+            warn(note) if not verified else ok(note)
+        elif verified:
+            ok(f"{new} is on {provider}'s model list")
+        model = new
     cfg["model"] = "" if model == default_model else model
 
 
-def ping_test(cfg):
+def ping_test(cfg, explain=True):
+    """One-token round trip. On failure prints the full 'what do I do now' block (unless explain=False)."""
+    from . import lifeline
     client = LLMClient(cfg)
-    old_max = cfg["max_tokens"]
-    cfg["max_tokens"] = 16
-    try:
-        t0 = time.time()
-        with Spinner("ping"):
-            client.chat("Reply with exactly: pong", [{"role": "user", "content": "ping"}], tools=None)
-        ok(f"model responded in {time.time()-t0:.1f}s", f"{client.model} via {client.provider}")
+    t0 = time.time()
+    with Spinner("ping"):
+        okp, err = client.probe()
+    for note in client.fallback_notes:
+        info(note)
+    if okp:
+        ok(f"model responded in {time.time()-t0:.1f}s", f"{client.model or '(default)'} via {client.provider}")
         return True
-    except (LLMError, RuntimeError) as e:
-        bad("connection test failed", str(e)[:200])
-        return False
-    finally:
-        cfg["max_tokens"] = old_max
+    bad("connection test failed", f"[{err.kind}] {str(err)[:200]}")
+    if explain:
+        print()
+        print("  " + lifeline.what_now(cfg, err, in_session=False).replace("\n", "\n  "))
+        print()
+    elif err.hint:
+        print(dim("    → " + err.hint[:300]))
+    return False
 
 
 # ---- one-click import -------------------------------------------------------
@@ -159,13 +235,27 @@ KIND_COLORS = {"memory": green, "skill": cyan, "command": magenta, "agent": yell
                "allow": green, "deny": red, "hook": yellow, "extension": dim, "setting": dim}
 
 
-def run_import(cfg, cwd=None, auto_yes=False):
-    from .importer import scan, apply, vscode_extension_list
+def run_import(cfg, cwd=None, auto_yes=False, paths=(), drives=None):
+    """paths: extra folders to look in (a skill, a skills folder, a copied ~/.claude, a project).
+    drives: True = also scan other/external drives · False = don't · None = ask if any are mounted."""
+    from .importer import scan, apply, vscode_extension_list, external_volumes, volume_label
     print(bold("\n  🥤 the gulp — import your gear from every other coding agent\n"))
     print(dim("  scanning Claude Code · Codex · Gemini CLI · Antigravity · Cursor · Windsurf · VS Code · Cline · Roo · Kilo\n"
               "           Continue · Copilot · OpenCode · Zed · Kiro · Amp · Junie · Aider · OpenClaw · Hermes …"))
+    paths = [p for p in (paths or []) if p]
+    if paths:
+        print(dim("  plus: " + ", ".join(paths)))
+    vols = external_volumes()
+    if vols and drives is None and not auto_yes:
+        labels = ", ".join(volume_label(v) for v in vols[:6]) + (" …" if len(vols) > 6 else "")
+        drives = yesno(f"also look on {len(vols)} other drive(s) for skills and agent folders? ({labels}) — takes a few seconds each", False)
+    use_vols = vols if drives else []
+    if use_vols:
+        print(dim("  other drives: " + ", ".join(volume_label(v) for v in use_vols)))
+    elif vols and drives is None:
+        print(dim(f"  ({len(vols)} other drive(s) mounted — `chode import --drives` or `/import --drives` to include them)"))
     with Spinner("scanning"):
-        items = scan(cfg, cwd)
+        items = scan(cfg, cwd, paths=paths, volumes=use_vols)
         exe, exts = vscode_extension_list()
     if exe and exts:
         from .importer import KNOWN_AI_EXTENSIONS, Item
@@ -173,7 +263,9 @@ def run_import(cfg, cwd=None, auto_yes=False):
         if ai and not any(i.kind == "extension" for i in items):
             items.append(Item("extension", f"{len(ai)} AI extension(s)", f"{exe} CLI", ai, ", ".join(l for _, l in ai)[:70]))
     if not items:
-        print(dim("\n  nothing found. (looked for rules, SKILL.md folders, commands, agents, mcpServers, permissions, hooks)\n"))
+        print(dim("\n  nothing found. (looked for rules, SKILL.md folders, commands, agents, mcpServers, permissions, hooks)"))
+        print(dim("  stuff somewhere else? `chode import <folder>` (a skill, a skills folder, a copied ~/.claude, a project)"
+                  + ("" if use_vols else " · `chode import --drives` scans other drives") + "\n"))
         return []
     print()
     agents = {}

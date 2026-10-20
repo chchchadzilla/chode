@@ -37,9 +37,14 @@ def project(tmp_path, monkeypatch):
     _git(["init", "-q", "-b", "main"], tmp_path)
     _git(["config", "user.email", "t@test"], tmp_path)
     _git(["config", "user.name", "tester"], tmp_path)
+    from chode.paths import CONFIG_FILE
+    if CONFIG_FILE.exists():
+        CONFIG_FILE.unlink()          # every test starts from default config (CHODE_HOME is shared)
     cfg = load_config(tmp_path)
     cfg["provider"] = "local"
     cfg["mode"] = "yolo"
+    cfg["fallbacks"] = False          # tests opt in to the ladder explicitly (never hit the real network)
+    cfg["retries"] = 0
     cfg["rag"]["auto_index"] = False
     cfg["order"]["auto_backup_hours"] = 0
     cfg["memory"]["auto_reflect"] = False
