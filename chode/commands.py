@@ -38,7 +38,7 @@ HELP = """
   {h}Brain{r}       /index   /search <query>   /skills [add <dir|url>]   /agents   /mcp [reload]   /hooks   /plans
   {h}Session{r}     /undo   /resume   /compact   /clear   /export [file]   /cost   /config [key value]   /permissions
   {h}Apps{r}        /gui   /ride claude|codex|gemini   /import [path…] [--drives]   /doctor   /theme [color]   /intro   /help   /exit
-  {h}Lifeline{r}    /fix (repair the model connection)   /lifeline (what CHODE falls back to)   /provider keep
+  {h}Lifeline{r}    /fix (repair the model connection)   /login [claude|codex|gemini]   /lifeline (what CHODE falls back to)   /provider keep
 """
 
 
@@ -137,6 +137,22 @@ def handle_slash(cmd, ctx):
         out = sampling.handle(cfg, client, rest)
         if out:
             print(out)
+
+    elif name == "login":
+        from . import plans
+        prov = rest[0].lower() if rest else client.provider
+        if prov in ("claude", "codex", "gemini"):
+            prov += "-plan"
+        if prov not in plans.PLAN_CLIS or prov == "custom-plan":
+            print(red(f"/login signs in a subscription CLI: claude | codex | gemini (current provider {client.provider} uses an "
+                      f"API key — `chode setup` to change it)"))
+        else:
+            cli = plans.PLAN_CLIS[prov][0]
+            print(dim(f"  🔑 opening the {cli} sign-in" + (" in a new window…" if getattr(ui, "name", "") == "web" else "…")))
+            ok, note = plans.login(prov, inline=False if getattr(ui, "name", "") == "web" else None)
+            print((green("  ✓ ") if ok else red("  ✗ ") if ok is False else "  ") + note)
+            client._plan = None
+            client._login_tried.discard(prov)
 
     elif name in ("fix", "lifeline", "fallbacks"):
         from . import lifeline
@@ -526,4 +542,4 @@ SLASH_NAMES = ["/help", "/mode", "/model", "/models", "/provider", "/skills", "/
                "/config", "/permissions", "/cost", "/clear", "/compact", "/init", "/memory", "/remember", "/memories",
                "/forget", "/conscience", "/ledger", "/status", "/order", "/about", "/tidy", "/backup", "/ship", "/release",
                "/banner", "/index", "/search", "/import", "/plans", "/ride", "/gui", "/doctor", "/diff", "/git", "/theme",
-               "/intro", "/export", "/commands", "/fix", "/lifeline", "/sampling", "/exit"]
+               "/intro", "/export", "/commands", "/fix", "/login", "/lifeline", "/sampling", "/exit"]

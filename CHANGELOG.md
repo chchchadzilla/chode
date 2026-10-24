@@ -3,6 +3,23 @@
 All notable changes to CHODE are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/) · Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Plan Bridge on Windows.** npm installs `claude`/`codex`/`gemini` as `.cmd` shims; CHODE's multi-line prompt went
+  through `cmd.exe` and died with "The syntax of the command is incorrect." CHODE now reads the shim and runs the real
+  program (`bin\claude.exe`, or `node <script>`) directly — for the bridge, sign-in, and `/ride`.
+- **Signed-out Claude Code is an error, not an answer.** `claude -p` reports "Not logged in · Please run /login" as an
+  `is_error` result; CHODE used to show that as the model's reply, so nothing fixed it. It is now an `auth` error.
+
+### Added
+- **Sign-in when it's needed.** The first time a plan CLI says it's signed out, CHODE opens its sign-in
+  (`claude auth login` / `codex login` / `gemini`) — inline in the terminal, or in its own window from the GUI —
+  waits, and retries the message. Once per session; after that it's a clear `[auth]` error with what to do.
+- **`/login [claude|codex|gemini]`** — sign a plan CLI in on demand (terminal or GUI).
+- **`/fix` / `chode fix` handle plan providers.** They check sign-in status, open the sign-in, and verify the provider
+  answers, instead of "fixing" with a ping that passed on the error text. They no longer switch you off your plan.
+
 ## [1.0.2] - 2026-10-19
 
 The "it still didn't work" release — from a real first-run failure: `HTTP 400 from anthropic: "temperature is

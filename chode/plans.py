@@ -12,6 +12,7 @@ Two ways to use it:
 """
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -31,6 +32,72 @@ PLAN_CLIS = {
 }
 TEMPLATE_KEYS = {"claude-plan": "claude", "codex-plan": "codex", "gemini-plan": "gemini", "custom-plan": "custom"}
 
+# cli → (args that report sign-in status, args that sign in). gemini has no status command;
+# its sign-in is the first interactive run.
+AUTH_ARGS = {
+    "claude": (["auth", "status", "--json"], ["auth", "login"]),
+    "codex":  (["login", "status"], ["login"]),
+    "gemini": (None, []),
+}
+_AUTH_MARKERS = ("not logged in", "please run /login", "run /login", "invalid api key", "oauth token has expired",
+                 "authentication_error", "not authenticated", "please log in", "codex login")
+
+
+class PlanAuthError(RuntimeError):
+    """The vendor CLI is installed but not signed in."""
+
+
+def looks_like_auth(text):
+    low = (text or "").lower()
+    return any(m in low for m in _AUTH_MARKERS)
+
+
+def logged_in(cli):
+    """True / False if the CLI can tell us, None if it can't (or isn't installed)."""
+    exe = _argv0(cli)
+    status_args = AUTH_ARGS.get(cli, (None, None))[0]
+    if not exe or not status_args:
+        return None
+    try:
+        proc = subprocess.run(exe + status_args, capture_output=True, text=True, timeout=30,
+                              encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    if cli == "claude":
+        obj = _last_json_object(proc.stdout)
+        if obj and "loggedIn" in obj:
+            return bool(obj["loggedIn"])
+    return proc.returncode == 0
+
+
+def login(provider, inline=None, timeout=600):
+    """Run the vendor's sign-in. inline=True runs it in this terminal; otherwise (the GUI, no tty) it gets its
+    own console window on Windows. Waits for it to finish, then re-checks. Returns (ok_or_None, message)."""
+    cli, label, hint = PLAN_CLIS.get(provider, (None, "", ""))
+    exe = _argv0(cli)
+    if not exe:
+        return False, f"`{cli or provider}` CLI not found ({label}). Install it: {hint}"
+    login_args = AUTH_ARGS.get(cli, (None, []))[1]
+    argv = exe + login_args
+    shown = " ".join([cli] + login_args)
+    if inline is None:
+        inline = sys.stdin is not None and sys.stdin.isatty()
+    conscience.log("plan_login", provider=provider, detail=shown)
+    try:
+        if inline:
+            subprocess.call(argv, timeout=timeout)
+        else:
+            flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
+            subprocess.Popen(argv, creationflags=flags).wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"{cli} sign-in didn't finish within {timeout // 60} min — run `{shown}` yourself"
+    except Exception as e:
+        return False, f"could not start the {cli} sign-in: {e}"
+    ok = logged_in(cli)
+    if ok is False:
+        return False, f"still not signed in to {cli}. Run `{shown}` in a terminal, then try again."
+    return ok, f"signed in to {cli} ({label})" if ok else f"{cli} sign-in finished"
+
 
 def _which(cmd):
     if not cmd:
@@ -40,6 +107,38 @@ def _which(cmd):
         if hit:
             return hit
     return None
+
+
+def _unshim(path):
+    """npm on Windows installs CLIs as .cmd batch shims. Arguments to a .cmd go through cmd.exe, which
+    chokes on CHODE's multi-line, quoted prompts ("The syntax of the command is incorrect."). Read the
+    shim and return the real argv prefix — [the .exe] or [node, the script] — or None if it isn't one."""
+    if os.name != "nt" or not path or Path(path).suffix.lower() not in (".cmd", ".bat"):
+        return None
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    base = Path(path).parent
+    for m in re.finditer(r'"%~?dp0%?\\([^"%]+)"', text):
+        target = base / m.group(1)
+        if not target.exists():
+            continue
+        if target.suffix.lower() == ".exe":
+            return [str(target)]
+        if target.suffix.lower() in (".js", ".cjs", ".mjs"):
+            node = base / "node.exe" if (base / "node.exe").exists() else shutil.which("node")
+            if node:
+                return [str(node), str(target)]
+    return None
+
+
+def _argv0(cmd):
+    """How to launch a CLI: the real program behind an npm shim when there is one."""
+    hit = _which(cmd)
+    if not hit:
+        return None
+    return _unshim(hit) or [hit]
 
 
 def detect_plans():
@@ -171,8 +270,8 @@ class PlanClient:
             argv = [argv[0]] + extra_codex + argv[1:] if argv else argv
         if self.key == "claude" and mode == "yolo" and "--permission-mode" not in argv:
             argv += ["--permission-mode", "bypassPermissions"]
-        if argv and _which(argv[0]):
-            argv[0] = _which(argv[0])
+        if argv and _argv0(argv[0]):
+            argv = _argv0(argv[0]) + argv[1:]
         conscience.log("plan_bridge", provider=self.provider, detail=" ".join(argv[:2]))
         t0 = time.time()
         try:
@@ -189,6 +288,10 @@ class PlanClient:
                 except Exception:
                     pass
         self.turns += 1
+        if proc.returncode != 0 and looks_like_auth(proc.stdout[-3000:] + proc.stderr[-3000:]):
+            obj = _last_json_object(proc.stdout) or {}
+            why = str(obj.get("result") or "") or (proc.stdout.strip() or proc.stderr.strip())[-300:]
+            raise PlanAuthError(f"{self.cli or 'plan cli'} is not signed in: {why}")
         if proc.returncode != 0 and not proc.stdout.strip():
             err = (proc.stderr or "").strip()[-1500:]
             raise RuntimeError(f"{self.cli or 'plan cli'} exited {proc.returncode}: {err or 'no output'}")
@@ -212,6 +315,8 @@ class PlanClient:
                 res["usage_out"] = u.get("output_tokens", 0)
                 res["cost"] = 0.0  # covered by the plan
                 if obj.get("is_error"):
+                    if looks_like_auth(res["content"]):
+                        raise PlanAuthError(f"Claude Code is not signed in: {res['content']}")
                     res["content"] = "Claude Code reported an error:\n" + res["content"]
                 return res
         elif self.key == "codex":
@@ -297,21 +402,21 @@ def ride(which, cfg, extra_args=None):
     from .agent import build_system_prompt_lite
     context = build_system_prompt_lite(cfg)
     if which == "claude":
-        exe = _which("claude")
+        exe = _argv0("claude")
         if not exe:
             return "claude CLI not found — npm i -g @anthropic-ai/claude-code"
         path = write_mcp_config(bridge_mode)
-        argv = [exe, "--mcp-config", path, "--append-system-prompt", context] + extra_args
+        argv = exe + ["--mcp-config", path, "--append-system-prompt", context] + extra_args
     elif which == "codex":
-        exe = _which("codex")
+        exe = _argv0("codex")
         if not exe:
             return "codex CLI not found — npm i -g @openai/codex"
-        argv = [exe, "-c", f'mcp_servers.chode.command="{spec["command"]}"',
+        argv = exe + ["-c", f'mcp_servers.chode.command="{spec["command"]}"',
                 "-c", "mcp_servers.chode.args=" + json.dumps(spec["args"]),
                 "-c", f'mcp_servers.chode.env={json.dumps(spec["env"])}'] + extra_args
         _write_agents_hint(context)
     elif which == "gemini":
-        exe = _which("gemini")
+        exe = _argv0("gemini")
         if not exe:
             return "gemini CLI not found — npm i -g @google/gemini-cli"
         # Gemini CLI reads project-level .gemini/settings.json for MCP servers
@@ -324,7 +429,7 @@ def ride(which, cfg, extra_args=None):
             settings = {}
         settings.setdefault("mcpServers", {})["chode"] = spec
         sfile.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-        argv = [exe] + extra_args
+        argv = exe + extra_args
         _write_agents_hint(context, name="GEMINI.md")
     else:
         return f"unknown ride target '{which}' (claude | codex | gemini)"

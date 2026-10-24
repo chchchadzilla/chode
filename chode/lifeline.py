@@ -242,6 +242,8 @@ def hint(kind, provider, model="", detail=""):
     key_env = PROVIDERS.get(provider, ("", "", "", ""))[2]
     free = f" Free alternative: {FREE_TIERS[provider]['signup']}" if provider in FREE_TIERS else ""
     if kind == "auth":
+        if PROVIDERS.get(provider, ("",))[0] == "plan":
+            return f"the {provider} CLI isn't signed in. Run /login (or `chode fix`) and finish the sign-in."
         if provider in KEYLESS:
             return f"{provider} refused the request (auth). It may be down or changed its API — docs: {docs}"
         return (f"{provider} rejected the API key. Check {key_env} (or run `chode setup` to paste a new one). "
@@ -459,6 +461,10 @@ def run_fixer(cfg, error=None, ui=None):
     from .permissions import Permissions
     from .ui import SilentUI, TerminalUI
     ui = ui or (state.app().ui if state.app() else TerminalUI())
+    if PROVIDERS.get(cfg.get("provider"), ("",))[0] == "plan":
+        out = _fix_plan(cfg, ui)
+        if out:
+            return out
     work = dict(cfg)
     work["fallbacks"] = "auto"
     note = ensure_usable(work, notify=None)
@@ -468,6 +474,7 @@ def run_fixer(cfg, error=None, ui=None):
         work["provider"], work["model"] = prov, model or ""
         client = LLMClient(work)
         client.allow_fallback = False
+        client.auto_login = False
         try:
             client.chat("Reply with exactly: pong", [{"role": "user", "content": "ping"}], tools=None)
         except LLMError as e:
@@ -487,6 +494,40 @@ def run_fixer(cfg, error=None, ui=None):
             last_err = e
             continue
     return ("No model anywhere could answer, so the fixer can't run. Here's the manual path:\n" + playbook(cfg, last_err or error))
+
+
+def _fix_plan(cfg, ui):
+    """Plan providers have no key or model list to repair — the usual break is the vendor CLI being
+    signed out. Sign it in, prove it answers, and report. Returns None to fall through to the
+    general fixer (CLI missing or still not answering)."""
+    from . import plans
+    from .llm import LLMClient, LLMError
+    provider = cfg["provider"]
+    cli, label, install = plans.PLAN_CLIS.get(provider, (None, "", ""))
+    if cli and not plans._which(cli):
+        if ui:
+            ui.notice(f"  `{cli}` isn't installed ({label}). Install: {install}", "warn")
+        return None
+    if cli and plans.logged_in(cli) is False:
+        if ui:
+            ui.notice(f"  🔑 {cli} isn't signed in — opening its sign-in…", "warn")
+        web = getattr(ui, "name", "") == "web"
+        ok, note = plans.login(provider, inline=False if web else None)
+        if ui:
+            ui.notice(("  ✓ " if ok else "  ✗ ") + note, "ok" if ok else "error")
+        if ok is False:
+            return (f"✗ {note}\nYour provider is still {provider}. To use something else meanwhile: "
+                    f"/provider pollinations (free, no key) or `chode setup`.")
+    client = LLMClient(dict(cfg))
+    client.allow_fallback = False
+    client.auto_login = False
+    try:
+        client.chat("Reply with exactly: pong", [{"role": "user", "content": "ping"}], tools=None)
+    except LLMError as e:
+        return (f"✗ {provider} still doesn't answer: [{e.kind}] {str(e)[:300]}\n"
+                + (f"→ {e.hint}\n" if e.hint else "")
+                + f"Your provider is still {provider}. To use something else meanwhile: /provider pollinations or `chode setup`.")
+    return f"✓ {provider} ({label}) is signed in and answering — you're good. Nothing else changed."
 
 
 _SAMPLING_PARAMS = ("temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens", "stream_options")
@@ -543,8 +584,11 @@ def what_now(cfg, error=None, in_session=True):
 
     # ---- what happened --------------------------------------------------------------
     section("WHAT HAPPENED")
+    is_plan = PROVIDERS.get(provider, ("",))[0] == "plan"
     if kind == "auth":
-        if provider in KEYLESS:
+        if is_plan:
+            L.append(f"  {provider} runs through a vendor CLI on your subscription, and that CLI isn't signed in.")
+        elif provider in KEYLESS:
             L.append(f"  {provider} refused the request. It's keyless, so this usually means the service is down or changed its API.")
         else:
             L.append(f"  {provider} rejected your API key (or there isn't one). The request never got to a model.")
@@ -591,7 +635,13 @@ def what_now(cfg, error=None, in_session=True):
 
     # ---- do this now --------------------------------------------------------------
     section("DO THIS NOW")
-    if kind == "auth" and provider not in KEYLESS:
+    if kind == "auth" and is_plan:
+        from .plans import AUTH_ARGS, PLAN_CLIS
+        cli = PLAN_CLIS.get(provider, (provider,))[0] or provider
+        L.append(f"  1. {'/login' if in_session else 'chode fix'} — opens the {cli} sign-in; finish it in the browser/window it opens.")
+        L.append(f"  2. Or sign in yourself in any terminal: {' '.join([cli] + AUTH_ARGS.get(cli, (None, []))[1])}")
+        L.append(f"  3. Then just send your message again.")
+    elif kind == "auth" and provider not in KEYLESS:
         pfx = KEY_PREFIXES.get(provider, "")
         L.append(f"  1. Get (or re-copy) a key: {keys_url}" + (f"   — real {provider} keys start with `{pfx}`" if pfx else ""))
         L.append(f"  2. Give it to CHODE: `chode setup` → \"API key I already have\" → paste it (stored chmod 600),")

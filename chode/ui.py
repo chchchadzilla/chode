@@ -104,6 +104,12 @@ def set_title(text):
 
 class Spinner:
     FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    current = None   # the spinning one, so an interactive step (a CLI sign-in) can silence it
+
+    @classmethod
+    def stop_current(cls):
+        if cls.current:
+            cls.current.stop()
 
     def __init__(self, label="thinking"):
         self.label = label
@@ -117,6 +123,7 @@ class Spinner:
             return self
         self.t0 = time.time()
         self._active = True
+        Spinner.current = self
         self._thread = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
         return self

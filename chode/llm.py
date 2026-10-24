@@ -71,6 +71,8 @@ class LLMClient:
         self.switched_from = None        # (provider, model) we started the session with
         self._corrected = {}             # provider -> set of model names already tried
         self._good = None                # (provider, model) last remembered as working
+        self.auto_login = True           # plan CLI not signed in → open its sign-in
+        self._login_tried = set()        # plan providers we already opened a sign-in for
 
     @property
     def provider(self): return self.cfg["provider"]
@@ -169,11 +171,22 @@ class LLMClient:
 
     def _chat_once(self, system, messages, tools, on_text):
         if self.api_style == "plan":
-            from .plans import PlanClient
+            from .plans import PlanAuthError, PlanClient
             if self._plan is None or self._plan.provider != self.provider:
                 self._plan = PlanClient(self.cfg, self.provider)
             try:
-                resp = self._plan.chat(system, messages, on_text=on_text)
+                try:
+                    resp = self._plan.chat(system, messages, on_text=on_text)
+                except PlanAuthError:
+                    if not self._plan_login():
+                        raise
+                    resp = self._plan.chat(system, messages, on_text=on_text)
+            except PlanAuthError as e:
+                from .plans import AUTH_ARGS
+                cli = self._plan.cli or self.provider
+                cmd = " ".join([cli] + AUTH_ARGS.get(cli, (None, []))[1])
+                raise LLMError(str(e), kind="auth", provider=self.provider,
+                               hint=f"sign in with /login (or run `{cmd}` in a terminal), then try again")
             except RuntimeError as e:
                 raise LLMError(str(e), kind="network", provider=self.provider, hint=str(e))
             self._track(resp.get("usage_in", 0), resp.get("usage_out", 0), cost=resp.get("cost"))
@@ -182,6 +195,27 @@ class LLMClient:
         if self.api_style == "anthropic":
             return self._chat_anthropic(system, messages, tools, on_text if stream else None)
         return self._chat_openai(system, messages, tools, on_text if stream else None)
+
+    def _plan_login(self):
+        """The plan CLI isn't signed in: open its sign-in once per provider per session. True if it worked."""
+        if not self.auto_login or self.provider in self._login_tried:
+            return False
+        self._login_tried.add(self.provider)
+        from . import plans, state
+        app = state.app()
+        ui = app.ui if app else None
+        cli = plans.PLAN_CLIS.get(self.provider, (self.provider,))[0]
+        web = getattr(ui, "name", "") == "web"
+        msg = (f"  🔑 {cli} isn't signed in — opening its sign-in"
+               + (" in a new window (finish it there, then come back)" if web else "") + "…")
+        from .ui import Spinner
+        Spinner.stop_current()
+        if ui:
+            ui.notice(msg, "warn")
+        ok, note = plans.login(self.provider, inline=False if web else None)
+        if ui:
+            ui.notice(("  ✓ " if ok else "  ✗ ") + note, "ok" if ok else "error")
+        return bool(ok)
 
     def _notify(self, note):
         self.fallback_notes.append(note)
